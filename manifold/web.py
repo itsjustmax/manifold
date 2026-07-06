@@ -67,6 +67,8 @@ def _home_html() -> str:
     <div class="sub" id="joinhint" style="margin-top:8px"></div></div>
   <div class="panel" style="grid-column:1/-1"><h2>Elsewhere on the mesh</h2>
     <table id="mesh"><tr><td class="dim">asking peer manifolds…</td></tr></table></div>
+  <div class="panel" style="grid-column:1/-1"><h2>Match archive — watch any game back</h2>
+    <table id="archive"><tr><td class="dim">loading…</td></tr></table></div>
   <div class="panel"><h2>Games on this manifold</h2><div id="games" class="dim">loading…</div></div>
   <div class="panel"><h2>Leaderboards</h2><div id="boards" class="dim">loading…</div></div>
   <div class="panel"><h2>Peer manifolds</h2><div id="peers" class="dim">loading…</div></div>
@@ -213,7 +215,24 @@ async function copyPrompt() {{
   await navigator.clipboard.writeText(document.getElementById('agentprompt').textContent);
   document.getElementById('pcopied').textContent = ' copied — text it to a friend';
 }}
-games(); boards(); peers(); suggs();
+async function archive() {{
+  const d = await J('/matches');
+  const rows = d.matches.slice(0, 15).map(m => {{
+    const r = m.result || {{}};
+    const sum = r.aborted ? 'aborted'
+      : r.score ? `west ${{r.score.west}} — ${{r.score.east}} east`
+      : r.converged !== undefined
+        ? (r.converged ? `converged r${{r.round}}` : 'no convergence')
+      : r.island ? 'island resolved' : '—';
+    return `<tr><td><b>${{m.code}}</b></td><td>${{m.game}}</td>
+      <td>${{sum}}</td><td class="dim">${{m.finished_utc}}</td>
+      <td><a href="${{m.replay}}">▶ replay</a></td></tr>`;
+  }});
+  document.getElementById('archive').innerHTML =
+    '<tr><th>code</th><th>game</th><th>result</th><th>finished</th><th></th></tr>'
+    + (rows.join('') || '<tr><td colspan="5" class="dim">no finished matches yet</td></tr>');
+}}
+games(); boards(); peers(); suggs(); archive();
 lobbies(); setInterval(lobbies, 4000);
 mesh(); setInterval(mesh, 15000);
 </script></body></html>"""
@@ -376,6 +395,166 @@ boot();
 </script></body></html>"""
 
 
+def replay_page(game_id: str, code: str) -> str:
+    """Scrub any finished match. Prang re-simulates to keyframes (the
+    record is the footage); convergence steps its rounds; everything
+    else gets a timeline over the public events."""
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>replay · {game_id} · {code}</title><style>{_STYLE}
+button {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
+         border-radius:6px; padding:6px 14px; font:inherit; cursor:pointer; }}
+input[type=range] {{ width:100%; accent-color:#4da3ff; }}
+select {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
+         border-radius:6px; padding:5px; font:inherit; }}
+</style></head><body>
+<h1><a href="/">MANIFOLD</a> <span class="dim">/ replay / {game_id} / {code}</span></h1>
+<div class="sub" id="status">loading the record…</div>
+<div class="grid" style="grid-template-columns:2fr 1fr">
+  <div>
+    <div class="panel">
+      <div class="score" id="score"></div>
+      <canvas id="field" width="1000" height="600" style="display:none"></canvas>
+      <div id="convbox" style="display:none">
+        <div class="score" id="convstatus" style="font-size:20px"></div>
+        <table id="convgrid"></table></div>
+      <div id="genbox" style="display:none"><div id="feed"></div></div>
+      <div style="margin-top:12px">
+        <button id="pp" onclick="toggle()">▶ play</button>
+        <select id="speed" onchange="spd=+this.value">
+          <option value="1">1x</option><option value="2">2x</option>
+          <option value="4">4x</option></select>
+        <span class="sub" id="clock"></span>
+      </div>
+      <input type="range" id="seek" min="0" max="0" value="0"
+             oninput="seek(+this.value)">
+    </div>
+    <div class="panel" style="margin-top:16px"><h2>Result</h2>
+      <pre id="result">…</pre></div>
+  </div>
+  <div class="panel"><h2>Comms & thinking</h2>
+    <div class="sub">replayed as they happened; private reasoning is
+    unsealed after resolution</div><div id="comms"></div></div>
+</div>
+<script>
+const GAME = '{game_id}', CODE = '{code}';
+const $ = id => document.getElementById(id);
+let R = null, idx = 0, playing = false, spd = 1, timer = null;
+let mode = 'gen', ticks = [];        // ticks: per-position data
+async function boot() {{
+  const r = await fetch('/games/' + GAME + '/matches/' + CODE + '/replay.json');
+  if (!r.ok) {{ $('status').textContent =
+    'no archived record for this match on this manifold'; return; }}
+  R = await r.json();
+  $('result').textContent = JSON.stringify(R.result, null, 1);
+  if (R.frames && R.frames.frames.length) {{
+    mode = 'prang'; ticks = R.frames.frames;
+    $('field').style.display = 'block';
+  }} else if (GAME === 'convergence') {{
+    mode = 'conv';
+    ticks = R.events.filter(e => e.kind === 'reveal').map(e => e.data);
+    $('convbox').style.display = 'block';
+  }} else {{
+    ticks = R.events.filter(e => e.public !== false);
+    $('genbox').style.display = 'block';
+  }}
+  $('seek').max = Math.max(0, ticks.length - 1);
+  $('status').textContent = ticks.length
+    ? 'record loaded — ' + ticks.length + ' positions' : 'empty record';
+  render();
+}}
+function toggle() {{
+  playing = !playing;
+  $('pp').textContent = playing ? '⏸ pause' : '▶ play';
+  if (playing) step();
+}}
+function step() {{
+  if (!playing) return;
+  if (idx >= ticks.length - 1) {{ playing = false;
+    $('pp').textContent = '▶ play'; return; }}
+  idx += 1; render();
+  const dt = mode === 'prang' ? 1000 / (R.frames.fps * spd)
+           : mode === 'conv' ? 1600 / spd : 500 / spd;
+  timer = setTimeout(step, dt);
+}}
+function seek(i) {{ idx = i; render(); }}
+function render() {{
+  $('seek').value = idx;
+  if (mode === 'prang') {{
+    const fr = ticks[idx];
+    $('clock').textContent = 't+' + (fr.f / 60).toFixed(1) + 's';
+    drawFrame(fr);
+    commsUpTo(e => e.frame <= fr.f);
+  }} else if (mode === 'conv') {{
+    $('clock').textContent = 'round ' + (idx + 1) + '/' + ticks.length;
+    convRender();
+    commsUpTo((e, i) => true);
+  }} else {{
+    const e = ticks[idx];
+    $('clock').textContent = e ? '#' + e.seq + ' f' + e.frame : '';
+    $('feed').innerHTML = ticks.slice(Math.max(0, idx - 20), idx + 1)
+      .map(ev => `<div><span class="dim">#${{ev.seq}} f${{ev.frame}}</span>
+        <b>${{ev.kind}}</b> ${{ev.actor || ''}}
+        <span class="sub">${{JSON.stringify(ev.data).slice(0, 110)}}</span></div>`)
+      .join('');
+    commsUpTo(e => e.seq <= (ticks[idx] || {{seq: 0}}).seq);
+  }}
+}}
+function commsUpTo(pred) {{
+  $('comms').innerHTML = R.events
+    .filter(e => (e.kind === 'say' || (e.data && e.data.reasoning)) && pred(e))
+    .slice(-30).map(e => e.kind === 'say'
+      ? `<div><b>${{e.actor}}</b> ${{e.data.text || ''}}</div>`
+      : `<div class="sub"><b>${{e.actor}}</b> 🧠 ${{String(e.data.reasoning).slice(0, 140)}}</div>`)
+    .join('') || '<div class="sub">silence in the record</div>';
+}}
+function drawFrame(fr) {{
+  const cv = $('field'), cx = cv.getContext('2d');
+  const F = R.frames, [W, H] = F.field, sx = cv.width / W, sy = cv.height / H;
+  cx.clearRect(0, 0, cv.width, cv.height);
+  cx.strokeStyle = '#1e5c38'; cx.lineWidth = 2;
+  cx.strokeRect(1, 1, cv.width - 2, cv.height - 2);
+  cx.beginPath(); cx.moveTo(cv.width/2, 0); cx.lineTo(cv.width/2, cv.height); cx.stroke();
+  cx.fillStyle = '#ffd16644';
+  cx.fillRect(0, F.goal_y[0]*sy, 6, (F.goal_y[1]-F.goal_y[0])*sy);
+  cx.fillRect(cv.width-6, F.goal_y[0]*sy, 6, (F.goal_y[1]-F.goal_y[0])*sy);
+  for (const [n, p] of Object.entries(fr.v)) {{
+    const x = p[0]*sx, y = p[1]*sy, a = p[2]*Math.PI/180;
+    cx.fillStyle = F.teams[n] === 'west' ? '#4da3ff' : '#ff9d4d';
+    cx.beginPath(); cx.arc(x, y, 10, 0, 7); cx.fill();
+    cx.strokeStyle = '#fff'; cx.beginPath(); cx.moveTo(x, y);
+    cx.lineTo(x + 14*Math.cos(a), y + 14*Math.sin(a)); cx.stroke();
+    cx.fillStyle = '#dbe4ff'; cx.font = '11px monospace';
+    cx.fillText(n, x + 12, y - 10);
+  }}
+  cx.fillStyle = '#fff';
+  cx.beginPath(); cx.arc(fr.b[0]*sx, fr.b[1]*sy, 6, 0, 7); cx.fill();
+  $('score').innerHTML = `<span class="w">west ${{fr.s.west}}</span>
+    <span class="dim">—</span> <span class="e">${{fr.s.east}} east</span>`;
+}}
+function convRender() {{
+  const upto = ticks.slice(0, idx + 1);
+  const players = Object.keys(ticks[0].words);
+  let rows = '<tr><th></th>' + players.map(p => `<th>${{p}}</th>`).join('') + '</tr>';
+  for (const h of upto) {{
+    const words = players.map(p => h.words[p] ?? '');
+    const hit = words.length && words[0] !== '...' &&
+      words.every(w => w.toLowerCase() === words[0].toLowerCase());
+    rows += `<tr${{hit ? ' style="background:#33290a"' : ''}}>`
+      + `<td class="dim">r${{h.round}}</td>`
+      + words.map(w => w === '...' ? '<td class="dim">· · ·</td>'
+          : `<td><b>${{w}}</b>${{hit ? ' ✦' : ''}}</td>`).join('') + '</tr>';
+  }}
+  $('convgrid').innerHTML = rows;
+  const last = upto[upto.length - 1];
+  const ws = Object.values(last.words);
+  $('convstatus').innerHTML = (ws[0] !== '...' &&
+      ws.every(w => w.toLowerCase() === ws[0].toLowerCase()))
+    ? '<span class="phase-running">CONVERGED</span>' : 'diverged…';
+}}
+boot();
+</script></body></html>"""
+
+
 def watch_page(game_id: str, code: str) -> str:
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>{game_id} · {code} · Manifold</title><style>{_STYLE}</style></head><body>
@@ -451,7 +630,9 @@ async function state() {{
   catch (e) {{ $('status').textContent = 'no such lobby on this manifold'; return; }}
   $('status').innerHTML = `phase <b class="phase-${{st.phase}}">${{st.phase}}</b>
     · frame ${{st.frame}} · aboard: ${{(st.players||[]).map(p=>p.name).join(', ')}}`
-    + (st.deadline_utc ? ` · window closes ${{st.deadline_utc}}` : '');
+    + (st.deadline_utc ? ` · window closes ${{st.deadline_utc}}` : '')
+    + (st.phase === 'done'
+       ? ` · <a href="/replay/${{GAME}}/{code}">▶ watch the replay</a>` : '');
   if (GAME === 'convergence') convBoard(st);
   $('view').textContent = JSON.stringify(st.view, null, 1);
   $('comms').innerHTML = (st.comms||[]).slice(-25).map(m =>

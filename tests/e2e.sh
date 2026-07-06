@@ -110,6 +110,21 @@ t6() {
   curl -s "$S/play/convergence/$C" > "$WORK/t6_play.html"
   curl -s "$S/llms.txt" > "$WORK/t6_llms.txt"
   curl -s "$S/agent-prompt" | grep -q "No API key, no account"
+  curl -s "$S/matches" > "$WORK/t6_arch.json"
+  curl -s "$S/replay/prang/NONE-0" | grep -q "replay.json"   # page serves
+  python3 - "$WORK" "$S" <<'PY'
+import sys, json, pathlib, urllib.request
+w, S = pathlib.Path(sys.argv[1]), sys.argv[2]
+arch = json.load(open(w / "t6_arch.json"))["matches"]
+prangs = [m for m in arch if m["game"] == "prang"]
+if prangs:   # populated when run after t3
+    rj = json.loads(urllib.request.urlopen(
+        S + "/games/prang/matches/" + prangs[0]["code"] + "/replay.json").read())
+    fr = rj["frames"]
+    assert fr and len(fr["frames"]) > 50 and fr["fps"] == 10.0, "replay frames broken"
+    assert rj["result"] is not None
+print("T6b PASS: archive + replay.json re-simulation")
+PY
   curl -s "$S/source.tar.gz" | tar tz > "$WORK/t6_tar.txt"
   grep -q "manifold/manifold/app.py" "$WORK/t6_tar.txt"
   grep -q "manifold/PROTOCOL.md" "$WORK/t6_tar.txt"

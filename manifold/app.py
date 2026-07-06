@@ -26,7 +26,7 @@ from .games.prang import Prang
 from .mesh import Mesh
 from .paths import data_dir
 from .recover import recover_live
-from .web import home_page, play_page, watch_page
+from .web import home_page, play_page, replay_page, watch_page
 
 DATA = data_dir()
 
@@ -181,6 +181,72 @@ def watch(game_id: str, code: str):
 def play(game_id: str, code: str):
     _game_cls(game_id)
     return play_page(game_id, code.upper())
+
+
+@app.get("/replay/{game_id}/{code}", response_class=HTMLResponse)
+def replay(game_id: str, code: str):
+    _game_cls(game_id)
+    return replay_page(game_id, code.upper())
+
+
+# --------------------------------------------------------- match archive
+def _match_events(game_id: str, code: str) -> list[dict]:
+    p = DATA / "matches" / f"{game_id}-{code.upper()}" / "log.jsonl"
+    if not p.exists():
+        raise HTTPException(404, f"no persisted match {game_id}/{code} — "
+                            "matches archive when they finish")
+    return [json.loads(l) for l in p.read_text().splitlines() if l.strip()]
+
+
+@app.get("/matches")
+def match_archive():
+    out = []
+    root = DATA / "matches"
+    if root.exists():
+        for d in sorted((d for d in root.iterdir() if d.is_dir()),
+                        key=lambda p: -p.stat().st_mtime)[:60]:
+            gid, _, code = d.name.partition("-")
+            if gid not in GAMES:
+                continue
+            summary = None
+            rp = d / "result.json"
+            if rp.exists():
+                try:
+                    r = json.loads(rp.read_text())
+                    summary = {k: r[k] for k in
+                               ("score", "winner", "converged", "round",
+                                "score_each", "aborted", "island")
+                               if k in r}
+                except json.JSONDecodeError:
+                    pass
+            out.append({"game": gid, "code": code,
+                        "finished_utc": iso(d.stat().st_mtime),
+                        "result": summary,
+                        "replay": f"/replay/{gid}/{code}"})
+    return {"matches": out}
+
+
+@app.get("/games/{game_id}/matches/{code}/replay.json")
+def replay_json(game_id: str, code: str):
+    """Everything the replay viewer needs, from the persisted record:
+    the full unsealed event log, the result, and — for games that
+    define replay_frames — re-simulated keyframes. The chain is the
+    footage."""
+    cls = _game_cls(game_id)
+    events = _match_events(game_id, code)
+    frames = None
+    fr = getattr(cls, "replay_frames", None)
+    if fr is not None:
+        try:
+            frames = fr(events)
+        except Exception:
+            frames = None
+    done = next((e for e in events if e["kind"] == "done"), None)
+    result = (done or {}).get("data", {}).get("result")
+    return {"game": game_id, "code": code.upper(),
+            "events": [e for e in events
+                       if e.get("data") != "[sealed]"],
+            "result": result, "frames": frames}
 
 
 # ------------------------------------------------- self-distribution

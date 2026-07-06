@@ -464,6 +464,40 @@ result. Anyone can verify.
                         "not pause. Score stands as of the last recorded "
                         "frame; no career result is recorded"}
 
+    @staticmethod
+    def replay_frames(events: list[dict], step: int = 6) -> dict | None:
+        """Re-simulate a finished match from its event log into
+        keyframes for the replay viewer — same pure functions as the
+        verifier, sampled at 10fps. The record IS the video."""
+        setup = next((e for e in events if e["kind"] == "setup"), None)
+        if setup is None:
+            return None
+        progs = sorted((e["data"] for e in events
+                        if e["kind"] == "program" and isinstance(e["data"], dict)),
+                       key=lambda d: (d["frame"], d["player"]))
+        roster = setup["data"]["roster"]
+        world = build_world(roster)
+        total = int(setup["data"]["match_seconds"] * FRAME_HZ)
+        if any(e["kind"] == "referee_restart" for e in events):
+            total = min(total, max(e["frame"] for e in events))
+        frames, i = [], 0
+        while world["frame"] < total:
+            f = world["frame"]
+            while i < len(progs) and progs[i]["frame"] == f:
+                apply_program(world, progs[i]["player"], progs[i]["segments"])
+                i += 1
+            physics_step(world)
+            if world["frame"] % step == 0:
+                frames.append({"f": world["frame"],
+                               "s": dict(world["score"]),
+                               "b": [world["ball"]["x"], world["ball"]["y"]],
+                               "v": {n: [v["x"], v["y"], v["ang"]]
+                                     for n, v in world["vessels"].items()}})
+        return {"fps": FRAME_HZ / step, "field": [FIELD_W, FIELD_H],
+                "goal_y": list(GOAL_Y),
+                "teams": {r["name"]: r["team"] for r in roster},
+                "frames": frames}
+
     def spectator_frame(self, lobby: Lobby) -> dict | None:
         """Broadcast feed for the human dashboard. Non-normative: the
         agent observation contract stays the O(1) view above; this is
