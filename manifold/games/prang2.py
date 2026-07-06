@@ -134,10 +134,7 @@ def physics_step(world: dict) -> str | None:
         else:
             p["vx"] = p["vy"] = p["vz"] = 0.0
         p["x"] += p["vx"]; p["y"] += p["vy"]; p["z"] += p["vz"]
-        if p["team"] == "west":
-            p["x"] = max(margin, min(AR_X / 2 - 40000.0, p["x"]))
-        else:
-            p["x"] = max(AR_X / 2 + 40000.0, min(AR_X - margin, p["x"]))
+        p["x"] = max(margin, min(AR_X - margin, p["x"]))
         p["y"] = max(margin, min(AR_Y - margin, p["y"]))
         p["z"] = max(margin, min(AR_Z - margin, p["z"]))
         p["yaw"] = _approach(p["yaw"], p["tyaw"], ANG_RATE)
@@ -164,10 +161,7 @@ def physics_step(world: dict) -> str | None:
             a["x"] -= sx * half; a["y"] -= sy * half; a["z"] -= sz * half
             c["x"] += sx * half; c["y"] += sy * half; c["z"] += sz * half
     for p2 in world["paddles"].values():
-        if p2["team"] == "west":
-            p2["x"] = max(margin, min(AR_X / 2 - 40000.0, p2["x"]))
-        else:
-            p2["x"] = max(AR_X / 2 + 40000.0, min(AR_X - margin, p2["x"]))
+        p2["x"] = max(margin, min(AR_X - margin, p2["x"]))
         p2["y"] = max(margin, min(AR_Y - margin, p2["y"]))
         p2["z"] = max(margin, min(AR_Z - margin, p2["z"]))
     # ball flight
@@ -271,7 +265,7 @@ def digest_state(prev: str, world: dict) -> str:
 class Prang2(Game):
     ID = "prang2"
     NAME = "Prang II"
-    VERSION = "2.3"     # 2.3: teammate separation law + follow cam
+    VERSION = "2.4"     # 2.4: full-court travel, orbit camera
     SKILLS = ["3d-spatial-planning", "realtime-control", "touch-modulation",
               "teamplay"]
 
@@ -298,7 +292,9 @@ One big ball (radius {BALL_R:,.0f}) under gravity — it arcs to about
 half the court height off a hard strike. Each end wall has a GOAL
 WINDOW: y in [{GOAL_Y[0]:,.0f}, {GOAL_Y[1]:,.0f}], z in
 [{GOAL_Z[0]:,.0f}, {GOAL_Z[1]:,.0f}]. West defends x=0 and attacks
-x={AR_X:,.0f}; east the reverse. You stay in your own half.
+x={AR_X:,.0f}; east the reverse. The WHOLE court is yours — press
+into their end, retreat to your window, poach midcourt. Only the
+spacing law constrains where you stand.
 
 ## Your paddle — a scalpel in a stadium
 A {PAD_W * 2:,.0f} x {PAD_H * 2:,.0f} rectangular face — TINY against

@@ -23,137 +23,140 @@ REPO_DEFAULT = "https://github.com/itsjustmax/manifold"
 # D = {arena:[X,Y,Z], gy:[..], gz:[..], ball:[x,y,z],
 #      paddles:[{name,team,x,y,z,yaw,pitch}], score:{west,east}}
 _P2_JS = r"""
-let P2CAM = {x: null, y: 0, z: 0};
-let P2FOLLOW = true;
+let P2MODE = 'orbit';                // orbit | overview
+let P2LOOK = {x: null, y: 0, z: 0};
 function p2ToggleCam(btn){
-  P2FOLLOW = !P2FOLLOW;
-  if (btn) btn.textContent = P2FOLLOW ? 'cam: follow' : 'cam: full court';
-}
-function p2proj(A, cw, ch){
-  return (x,y,z) => [60 + (x/A[0])*(cw-170) + (y/A[1])*52,
-                     (ch-64) - (z/A[2])*(ch-168) - (y/A[1])*44];
+  P2MODE = P2MODE === 'orbit' ? 'overview' : 'orbit';
+  if (btn) btn.textContent = 'cam: ' + P2MODE;
 }
 function drawP2(cv, D){
   const cx = cv.getContext('2d'), A = D.arena;
-  cx.clearRect(0,0,cv.width,cv.height);
-  // follow cam: smooth-track the ball at zoom; full court on toggle
+  const cw = cv.width, ch = cv.height;
+  cx.clearRect(0,0,cw,ch);
   const [Bx,By,Bz] = D.ball;
-  if (P2CAM.x === null) P2CAM = {x:Bx, y:By, z:Bz};
-  P2CAM.x += (Bx-P2CAM.x)*0.35; P2CAM.y += (By-P2CAM.y)*0.35;
-  P2CAM.z += (Bz-P2CAM.z)*0.35;
-  const Z = P2FOLLOW ? 5 : 1;
-  // hard leash: the ball may never leave the frame, however fast it
-  // flies — clamp the camera to within 55% of the half-view per axis
-  const leash = (c, b, half) =>
-    Math.abs(b - c) > half*0.55 ? b - Math.sign(b - c)*half*0.55 : c;
-  P2CAM.x = leash(P2CAM.x, Bx, A[0]/(2*Z));
-  P2CAM.y = leash(P2CAM.y, By, A[1]/(2*Z));
-  P2CAM.z = leash(P2CAM.z, Bz, A[2]/(2*Z));
-  const cmx = P2FOLLOW ? P2CAM.x : A[0]/2;
-  const cmy = P2FOLLOW ? P2CAM.y : A[1]/2;
-  const cmz = P2FOLLOW ? P2CAM.z : A[2]/2;
-  const base = p2proj(A, cv.width, cv.height);
-  const P = (x,y,z) => base(A[0]/2 + (x-cmx)*Z,
-                            A[1]/2 + (y-cmy)*Z,
-                            A[2]/2 + (z-cmz)*Z);
-  const line = (a,b,st) => { cx.strokeStyle=st||'#1f2b4d'; cx.beginPath();
-    cx.moveTo(...a); cx.lineTo(...b); cx.stroke(); };
-  const C = [[0,0,0],[A[0],0,0],[A[0],A[1],0],[0,A[1],0],
-             [0,0,A[2]],[A[0],0,A[2]],[A[0],A[1],A[2]],[0,A[1],A[2]]]
-            .map(c => P(...c));
-  cx.lineWidth = 1;
-  [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],
-   [0,4],[1,5],[2,6],[3,7]].forEach(([a,b]) => line(C[a], C[b]));
-  // floor grid hint + halfway plane
-  line(P(A[0]/2,0,0), P(A[0]/2,A[1],0), '#16203c');
-  line(P(A[0]/2,0,A[2]), P(A[0]/2,A[1],A[2]), '#16203c');
-  // goal windows on both end walls
-  for (const gx of [0, A[0]]) {
-    cx.strokeStyle = '#ffd166'; cx.lineWidth = 2;
-    cx.beginPath();
-    const g = [[gx,D.gy[0],D.gz[0]],[gx,D.gy[1],D.gz[0]],
-               [gx,D.gy[1],D.gz[1]],[gx,D.gy[0],D.gz[1]]].map(c=>P(...c));
-    cx.moveTo(...g[0]); g.slice(1).forEach(p=>cx.lineTo(...p));
-    cx.closePath(); cx.stroke();
+  if (P2LOOK.x === null) P2LOOK = {x:Bx, y:By, z:Bz};
+  P2LOOK.x += (Bx-P2LOOK.x)*0.12; P2LOOK.y += (By-P2LOOK.y)*0.12;
+  P2LOOK.z += (Bz-P2LOOK.z)*0.12;
+  const cx0=A[0]/2, cy0=A[1]/2, cz0=A[2]/2;
+  // a real 3D camera: slow orbit around the court, look-at biased
+  // toward the ball; overview mode parks high behind the sideline
+  let C, T;
+  if (P2MODE === 'orbit'){
+    const az = Date.now()*0.00010;
+    C = [cx0 + A[0]*0.72*Math.cos(az),
+         cy0 + A[0]*0.58*Math.sin(az),
+         A[2]*1.35];
+    T = [(P2LOOK.x+cx0)/2, (P2LOOK.y+cy0)/2, (P2LOOK.z+cz0)/2];
+  } else {
+    C = [cx0, cy0 - A[1]*1.7, A[2]*1.6];
+    T = [cx0, cy0, cz0*0.8];
   }
-  cx.lineWidth = 1;
-  // ball shadow on the floor, then the ball (size hints depth)
-  const [bx,by,bz] = D.ball;
-  const sh = P(bx,by,0);
-  const br = Math.max(5, Math.min(60,
-    ((D.ball_r || A[2]*0.015) / A[2]) * (cv.height-168) * Z));
-  cx.fillStyle = 'rgba(0,0,0,0.45)';
-  cx.beginPath(); cx.ellipse(sh[0],sh[1],br*0.9,br*0.35,0,0,7); cx.fill();
-  const bp = P(bx,by,bz);
-  cx.fillStyle = '#fff';
-  cx.beginPath(); cx.arc(bp[0],bp[1],br,0,7); cx.fill();
-  // paddles: physically sub-pixel on a court this vast, so draw at a
-  // fixed SCREEN size with the TRUE orientation — project the face
-  // axes, normalize to pixels. The tilt you see is the tilt that is.
-  const norm = (vpx) => {
-    const m = Math.hypot(vpx[0], vpx[1]) || 1;
-    return [vpx[0]/m, vpx[1]/m];
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const crs=(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2],
+                    a[0]*b[1]-a[1]*b[0]];
+  const nrm=(v)=>{const m=Math.hypot(v[0],v[1],v[2])||1;
+                  return [v[0]/m,v[1]/m,v[2]/m];};
+  const f = nrm(sub(T,C));
+  const r = nrm(crs(f,[0,0,1]));
+  const u = crs(r,f);
+  const FL = ch*1.15, NEAR = A[0]*0.01;
+  const view=(p)=>{const d=sub(p,C);
+    return [d[0]*r[0]+d[1]*r[1]+d[2]*r[2],
+            d[0]*u[0]+d[1]*u[1]+d[2]*u[2],
+            d[0]*f[0]+d[1]*f[1]+d[2]*f[2]];};
+  const scr=(v)=>[cw/2 + v[0]*FL/v[2], ch/2 - v[1]*FL/v[2]];
+  const P=(x,y,z)=>{const v=view([x,y,z]); return v[2]>NEAR?scr(v):null;};
+  const seg=(a,b,st)=>{
+    let va=view(a), vb=view(b);
+    if (va[2]<=NEAR && vb[2]<=NEAR) return;
+    if (va[2]<NEAR){const k=(NEAR-va[2])/(vb[2]-va[2]);
+      va=[va[0]+(vb[0]-va[0])*k, va[1]+(vb[1]-va[1])*k, NEAR];}
+    if (vb[2]<NEAR){const k=(NEAR-vb[2])/(va[2]-vb[2]);
+      vb=[vb[0]+(va[0]-vb[0])*k, vb[1]+(va[1]-vb[1])*k, NEAR];}
+    cx.strokeStyle=st||'#1f2b4d'; cx.beginPath();
+    cx.moveTo(...scr(va)); cx.lineTo(...scr(vb)); cx.stroke();
   };
-  const L = A[0] * 0.02;               // probe length for projecting axes
-  for (const p of D.paddles) {
-    const ya = p.yaw*Math.PI/180, pi = p.pitch*Math.PI/180;
-    const cyw = Math.cos(ya), syw = Math.sin(ya);
-    const cpt = Math.cos(pi), spt = Math.sin(pi);
-    const n  = [cpt*cyw, cpt*syw, spt];
-    const t1 = [-syw, cyw, 0];
-    const t2 = [-spt*cyw, -spt*syw, cpt];
-    const pp = P(p.x, p.y, p.z);
-    const ax = (v) => {
-      const q = P(p.x + v[0]*L, p.y + v[1]*L, p.z + v[2]*L);
-      return norm([q[0]-pp[0], q[1]-pp[1]]);
-    };
-    const u1 = ax(t1), u2 = ax(t2), un = ax(n);
-    const HWpx = 16, HHpx = 10;
-    const q = [[-1,-1],[1,-1],[1,1],[-1,1]].map(([su,sv]) =>
-      [pp[0] + su*HWpx*u1[0] + sv*HHpx*u2[0],
-       pp[1] + su*HWpx*u1[1] + sv*HHpx*u2[1]]);
-    const psh = P(p.x, p.y, 0);
-    cx.fillStyle = 'rgba(0,0,0,0.30)';
-    cx.beginPath(); cx.ellipse(psh[0],psh[1],10,4,0,0,7); cx.fill();
-    cx.fillStyle = p.team === 'west' ? 'rgba(77,163,255,0.45)'
-                                     : 'rgba(255,157,77,0.45)';
-    cx.strokeStyle = p.team === 'west' ? '#4da3ff' : '#ff9d4d';
-    cx.lineWidth = 2;
+  const V=[[0,0,0],[A[0],0,0],[A[0],A[1],0],[0,A[1],0],
+           [0,0,A[2]],[A[0],0,A[2]],[A[0],A[1],A[2]],[0,A[1],A[2]]];
+  cx.lineWidth=1;
+  [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],
+   [0,4],[1,5],[2,6],[3,7]].forEach(([a,b])=>seg(V[a],V[b]));
+  for (let i=1;i<4;i++) seg([A[0]*i/4,0,0],[A[0]*i/4,A[1],0],'#101a33');
+  for (let j=1;j<3;j++) seg([0,A[1]*j/3,0],[A[0],A[1]*j/3,0],'#101a33');
+  for (const gx of [0,A[0]]){
+    const g=[[gx,D.gy[0],D.gz[0]],[gx,D.gy[1],D.gz[0]],
+             [gx,D.gy[1],D.gz[1]],[gx,D.gy[0],D.gz[1]]];
+    cx.lineWidth=2;
+    for(let i=0;i<4;i++) seg(g[i],g[(i+1)%4],'#ffd166');
+    cx.lineWidth=1;
+  }
+  const vb=view([Bx,By,Bz]);
+  if (vb[2]>NEAR){
+    const br=Math.max(4, Math.min(90, (D.ball_r||A[2]*0.015)*FL/vb[2]));
+    const shp=P(Bx,By,0);
+    if (shp){cx.fillStyle='rgba(0,0,0,0.45)';
+      cx.beginPath(); cx.ellipse(shp[0],shp[1],br*0.9,br*0.32,0,0,7);
+      cx.fill();}
+    const bp=scr(vb);
+    cx.fillStyle='#fff'; cx.beginPath(); cx.arc(bp[0],bp[1],br,0,7);
+    cx.fill();
+  }
+  // paddles: fixed screen size, true orientation via projected axes
+  const norm2=(v)=>{const m=Math.hypot(v[0],v[1])||1;
+                    return [v[0]/m,v[1]/m];};
+  const L = A[0]*0.02;
+  for (const p of D.paddles){
+    const pp = P(p.x,p.y,p.z);
+    if (!pp) continue;
+    const ya=p.yaw*Math.PI/180, pi=p.pitch*Math.PI/180;
+    const cyw=Math.cos(ya), syw=Math.sin(ya);
+    const cpt=Math.cos(pi), spt=Math.sin(pi);
+    const n =[cpt*cyw, cpt*syw, spt];
+    const t1=[-syw, cyw, 0];
+    const t2=[-spt*cyw, -spt*syw, cpt];
+    const ax=(v)=>{const q=P(p.x+v[0]*L, p.y+v[1]*L, p.z+v[2]*L);
+      return q ? norm2([q[0]-pp[0], q[1]-pp[1]]) : [1,0];};
+    const u1=ax(t1), u2=ax(t2), un=ax(n);
+    const q=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([su,sv])=>
+      [pp[0]+su*16*u1[0]+sv*10*u2[0], pp[1]+su*16*u1[1]+sv*10*u2[1]]);
+    const psh=P(p.x,p.y,0);
+    if (psh){cx.fillStyle='rgba(0,0,0,0.30)';
+      cx.beginPath(); cx.ellipse(psh[0],psh[1],10,4,0,0,7); cx.fill();}
+    cx.fillStyle = p.team==='west' ? 'rgba(77,163,255,0.45)'
+                                   : 'rgba(255,157,77,0.45)';
+    cx.strokeStyle = p.team==='west' ? '#4da3ff' : '#ff9d4d';
+    cx.lineWidth=2;
     cx.beginPath(); cx.moveTo(...q[0]);
-    q.slice(1).forEach(c => cx.lineTo(...c));
+    q.slice(1).forEach(c=>cx.lineTo(...c));
     cx.closePath(); cx.fill(); cx.stroke();
-    cx.lineWidth = 1;
-    const tip = [pp[0] + un[0]*34, pp[1] + un[1]*34];
-    line(pp, tip, '#dbe4ff');
-    cx.fillStyle = '#dbe4ff';
-    cx.beginPath(); cx.arc(tip[0], tip[1], 2.5, 0, 7); cx.fill();
-    cx.font = '11px monospace';
+    cx.lineWidth=1;
+    cx.strokeStyle='#dbe4ff'; cx.beginPath();
+    cx.moveTo(...pp); cx.lineTo(pp[0]+un[0]*34, pp[1]+un[1]*34);
+    cx.stroke();
+    cx.fillStyle='#dbe4ff'; cx.font='11px monospace';
     cx.fillText(p.name, pp[0]+18, pp[1]-12);
   }
-  // minimap (top view): whole court, everyone, the camera window
-  const mw = 170, mh = Math.round(mw*A[1]/A[0]);
-  const mx0 = cv.width-mw-14, my0 = 12;
-  cx.fillStyle = 'rgba(10,16,32,0.85)';
+  // minimap (top view): whole court, everyone, ball
+  const mw=170, mh=Math.round(mw*A[1]/A[0]);
+  const mx0=cw-mw-14, my0=12;
+  cx.fillStyle='rgba(10,16,32,0.85)';
   cx.fillRect(mx0-4,my0-4,mw+8,mh+8);
-  cx.strokeStyle = '#2a3a63'; cx.strokeRect(mx0,my0,mw,mh);
-  const M = (x,y) => [mx0 + x/A[0]*mw, my0 + y/A[1]*mh];
-  const gy0 = M(0,D.gy[0])[1], gy1 = M(0,D.gy[1])[1];
-  cx.fillStyle = '#ffd166';
-  cx.fillRect(mx0-3, gy0, 3, gy1-gy0);
-  cx.fillRect(mx0+mw, gy0, 3, gy1-gy0);
+  cx.strokeStyle='#2a3a63'; cx.strokeRect(mx0,my0,mw,mh);
+  const M=(x,y)=>[mx0+x/A[0]*mw, my0+y/A[1]*mh];
+  const gy0=M(0,D.gy[0])[1], gy1=M(0,D.gy[1])[1];
+  cx.fillStyle='#ffd166';
+  cx.fillRect(mx0-3,gy0,3,gy1-gy0); cx.fillRect(mx0+mw,gy0,3,gy1-gy0);
   for (const p of D.paddles){
-    const m = M(p.x,p.y);
+    const m=M(p.x,p.y);
     cx.fillStyle = p.team==='west' ? '#4da3ff' : '#ff9d4d';
-    cx.fillRect(m[0]-2, m[1]-2, 4, 4);
+    cx.fillRect(m[0]-2,m[1]-2,4,4);
   }
-  const mb = M(Bx,By);
-  cx.fillStyle = '#fff';
-  cx.beginPath(); cx.arc(mb[0],mb[1],3,0,7); cx.fill();
-  if (P2FOLLOW){
-    const tl = M(Math.max(0,cmx-A[0]/(2*Z)), Math.max(0,cmy-A[1]/(2*Z)));
-    cx.strokeStyle = '#dbe4ff';
-    cx.strokeRect(tl[0], tl[1], mw/Z, mh/Z);
-  }
+  const mb=M(Bx,By);
+  cx.fillStyle='#fff'; cx.beginPath(); cx.arc(mb[0],mb[1],3,0,7); cx.fill();
+  // camera position hint on the minimap
+  const mc=M(Math.max(0,Math.min(A[0],C[0])), Math.max(0,Math.min(A[1],C[1])));
+  cx.strokeStyle='#dbe4ff';
+  cx.beginPath(); cx.arc(mc[0],mc[1],4,0,7); cx.stroke();
 }
 """
 
@@ -637,7 +640,7 @@ select {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
       <div style="margin-top:12px">
         <button id="pp" onclick="toggle()">▶ play</button>
         <button id="camb2" onclick="p2ToggleCam(this)"
-          style="display:none">cam: follow</button>
+          style="display:none">cam: orbit</button>
         <select id="speed" onchange="spd=+this.value">
           <option value="1">1x</option><option value="2">2x</option>
           <option value="4">4x</option></select>
@@ -834,7 +837,7 @@ def watch_page(game_id: str, code: str) -> str:
       <button id="camb" onclick="p2ToggleCam(this)" style="display:none;
         background:#1a2547;color:var(--ink);border:1px solid var(--edge);
         border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer;
-        margin-bottom:6px">cam: follow</button>
+        margin-bottom:6px">cam: orbit</button>
       <canvas id="field" width="1000" height="600"></canvas>
     </div>
     <div class="panel" id="convbox" style="display:none">

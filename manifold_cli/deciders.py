@@ -310,7 +310,9 @@ class MockPaddle:
             tz = max(gz - 0.1 * float(A[2]),
                      min(gz + 0.1 * float(A[2]), ball["z"]))
         else:
-            frac = (0.15 if idx == 0 else 0.30)
+            # full-court travel: the attacker presses the enemy end,
+            # the mid holds the middle third
+            frac = (0.70 if idx == 0 else 0.45)
             station = (frac if atk_west else 1 - frac) * X
             tx = ball["x"] if swing else station
             ours = (ball["x"] < X / 2) == (own_gx == 0.0)
