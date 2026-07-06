@@ -13,6 +13,83 @@ import os
 # canonical repo; operators can override with MANIFOLD_REPO env
 REPO_DEFAULT = "https://github.com/itsjustmax/manifold"
 
+# Shared fogline island renderer (plain string, not an f-string, so JS
+# braces stay literal). The island is seeded from its name — the same
+# island always draws the same coastline — and the fog lifts cloud by
+# cloud as ticks pass. Below the scene: the answer domain as a shore
+# strip with the stake intervals, the crowd's decile histogram, and at
+# reveal, the golden truth line.
+_FOG_JS = r"""
+function mulberry(seed){let t=seed>>>0;return()=>{t+=0x6D2B79F5;let r=Math.imul(t^t>>>15,1|t);r^=r+Math.imul(r^r>>>7,61|r);return((r^r>>>14)>>>0)/4294967296;};}
+function hashStr(s){let h=2166136261;for(const c of String(s)){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+function drawFogline(cv, D){
+  const cx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  const seaH=Math.floor(H*0.62), stripY=seaH+42;
+  cx.clearRect(0,0,W,H);
+  const g=cx.createLinearGradient(0,0,0,seaH);
+  g.addColorStop(0,'#081527'); g.addColorStop(1,'#0d2b4d');
+  cx.fillStyle=g; cx.fillRect(0,0,W,seaH);
+  const rnd=mulberry(hashStr(D.name||'island'));
+  const cxr=W*0.5, cyr=seaH*0.62, base=seaH*0.42, n=14, pts=[];
+  for(let i=0;i<n;i++){const a=i/n*2*Math.PI;const r=base*(0.55+0.5*rnd());
+    pts.push([cxr+r*Math.cos(a)*1.8, cyr+r*Math.sin(a)*0.55]);}
+  cx.beginPath(); cx.moveTo((pts[0][0]+pts[1][0])/2,(pts[0][1]+pts[1][1])/2);
+  for(let i=1;i<=n;i++){const p=pts[i%n],q=pts[(i+1)%n];
+    cx.quadraticCurveTo(p[0],p[1],(p[0]+q[0])/2,(p[1]+q[1])/2);}
+  cx.closePath();
+  cx.fillStyle='#d8c58b'; cx.fill();
+  cx.save(); cx.clip();
+  cx.fillStyle='#2b4a2e';
+  cx.beginPath(); cx.ellipse(cxr,cyr,base*1.55,base*0.42,0,0,7); cx.fill();
+  cx.fillStyle='#1d3320';
+  cx.beginPath(); cx.moveTo(cxr-40,cyr+8); cx.lineTo(cxr+6,cyr-base*0.55);
+  cx.lineTo(cxr+52,cyr+10); cx.closePath(); cx.fill();
+  cx.restore();
+  const total=D.n_ticks||6, done=Math.min(D.tick||0,total);
+  const frnd=mulberry(hashStr((D.name||'x')+'fog'));
+  const clouds=30;
+  for(let i=0;i<clouds;i++){
+    const x=frnd()*W, y=frnd()*seaH, r=34+frnd()*72;
+    if(i < clouds*done/total) continue;      // lifted
+    const cg=cx.createRadialGradient(x,y,r*0.15,x,y,r);
+    cg.addColorStop(0,'rgba(188,198,214,0.93)');
+    cg.addColorStop(1,'rgba(188,198,214,0)');
+    cx.fillStyle=cg; cx.beginPath(); cx.arc(x,y,r,0,7); cx.fill();
+  }
+  cx.fillStyle='#dbe4ff'; cx.font='bold 15px monospace';
+  cx.fillText(D.name||'uncharted island', 12, 22);
+  cx.fillStyle='#7e8bb3'; cx.font='12px monospace';
+  cx.fillText('fog lifting: tick '+done+'/'+total, 12, 40);
+  if(D.clue){cx.fillStyle='#ffd166'; cx.font='13px monospace';
+    cx.fillText(('clue: '+D.clue).slice(0,118), 12, seaH-10);}
+  const dom=D.domain||[0,1], lo=+dom[0], hi=+dom[1], span=(hi-lo)||1;
+  const X=v=>22+(W-44)*(v-lo)/span;
+  cx.strokeStyle='#2a3a63'; cx.beginPath();
+  cx.moveTo(22,stripY); cx.lineTo(W-22,stripY); cx.stroke();
+  cx.fillStyle='#7e8bb3'; cx.font='11px monospace';
+  cx.fillText(lo.toLocaleString(),22,stripY+16);
+  const ht=hi.toLocaleString();
+  cx.fillText(ht,W-22-cx.measureText(ht).width,stripY+16);
+  const hist=D.hist||[], hmax=Math.max(1,...hist), bw=(W-44)/10;
+  hist.forEach((h,i)=>{cx.fillStyle='rgba(77,163,255,0.22)';
+    const bh=Math.round(30*h/hmax);
+    cx.fillRect(22+i*bw, stripY-bh-2, bw-2, bh);});
+  (D.stakes||[]).slice(-16).forEach((s,i)=>{
+    const y=stripY-8-i*6;
+    cx.strokeStyle=s.bucket==='large'?'#ff9d4d':s.bucket==='medium'?'#ffd166':'#4da3ff';
+    cx.lineWidth=s.bucket==='large'?4:s.bucket==='medium'?3:2;
+    cx.beginPath(); cx.moveTo(X(Math.max(lo,s.lo)),y);
+    cx.lineTo(X(Math.min(hi,s.hi)),y); cx.stroke();});
+  cx.lineWidth=1;
+  if(D.truth!=null){const x=X(D.truth);
+    cx.strokeStyle='#ffd166'; cx.lineWidth=2;
+    cx.beginPath(); cx.moveTo(x,stripY-100); cx.lineTo(x,stripY+4); cx.stroke();
+    cx.fillStyle='#ffd166'; cx.font='bold 12px monospace';
+    cx.fillText('truth: '+D.truth.toLocaleString(),
+                Math.min(x+6, W-150), stripY-88); cx.lineWidth=1;}
+}
+"""
+
 _STYLE = """
 :root { --bg:#0b1020; --panel:#121a30; --edge:#1f2b4d; --ink:#dbe4ff;
         --dim:#7e8bb3; --west:#4da3ff; --east:#ff9d4d; --gold:#ffd166;
@@ -417,6 +494,7 @@ select {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
       <div id="convbox" style="display:none">
         <div class="score" id="convstatus" style="font-size:20px"></div>
         <table id="convgrid"></table></div>
+      <canvas id="fogcv2" width="1000" height="460" style="display:none;background:transparent;border:none"></canvas>
       <div id="genbox" style="display:none"><div id="feed"></div></div>
       <div style="margin-top:12px">
         <button id="pp" onclick="toggle()">▶ play</button>
@@ -436,10 +514,11 @@ select {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
     unsealed after resolution</div><div id="comms"></div></div>
 </div>
 <script>
+{_FOG_JS}
 const GAME = '{game_id}', CODE = '{code}';
 const $ = id => document.getElementById(id);
 let R = null, idx = 0, playing = false, spd = 1, timer = null;
-let mode = 'gen', ticks = [];        // ticks: per-position data
+let mode = 'gen', ticks = [], fog = null;   // ticks: per-position data
 async function boot() {{
   const r = await fetch('/games/' + GAME + '/matches/' + CODE + '/replay.json');
   if (!r.ok) {{ $('status').textContent =
@@ -453,6 +532,23 @@ async function boot() {{
     mode = 'conv';
     ticks = R.events.filter(e => e.kind === 'reveal').map(e => e.data);
     $('convbox').style.display = 'block';
+  }} else if (GAME === 'fogline') {{
+    mode = 'fog';
+    const surface = R.events.find(e => e.kind === 'surface');
+    const reveal = R.events.find(e => e.kind === 'reveal');
+    fog = {{
+      isl: (((surface || {{}}).data || {{}}).announcement || {{}}).island || {{}},
+      clues: R.events.filter(e => e.kind === 'clue').map(e => e.data),
+      stakes: R.events.filter(e => e.kind === 'stake_public').map(e => e.data),
+      aggs: R.events.filter(e => e.kind === 'tick_close').map(e => e.data),
+      closes: Object.fromEntries(R.events.filter(e => e.kind === 'tick_close')
+        .map(e => [e.data.tick, e.seq])),
+      truth: reveal ? reveal.data.truth : null,
+    }};
+    fog.N = fog.clues.length || 6;
+    ticks = fog.clues.map(c => ({{tick: c.tick}}));
+    if (fog.truth !== null) ticks.push({{tick: fog.N, reveal: true}});
+    $('fogcv2').style.display = 'block';
   }} else {{
     ticks = R.events.filter(e => e.public !== false);
     $('genbox').style.display = 'block';
@@ -473,7 +569,8 @@ function step() {{
     $('pp').textContent = '▶ play'; return; }}
   idx += 1; render();
   const dt = mode === 'prang' ? 1000 / (R.frames.fps * spd)
-           : mode === 'conv' ? 1600 / spd : 500 / spd;
+           : mode === 'conv' ? 1600 / spd
+           : mode === 'fog' ? 2200 / spd : 500 / spd;
   timer = setTimeout(step, dt);
 }}
 function seek(i) {{ idx = i; render(); }}
@@ -488,6 +585,23 @@ function render() {{
     $('clock').textContent = 'round ' + (idx + 1) + '/' + ticks.length;
     convRender();
     commsUpTo((e, i) => true);
+  }} else if (mode === 'fog') {{
+    const pos = ticks[idx], t = pos.tick;
+    const hist = new Array(10).fill(0);
+    fog.aggs.filter(a => a.tick <= t).forEach(a =>
+      (a.interval_decile_hist || []).forEach((h, i) => hist[i] += h));
+    const stakes = fog.stakes.filter(s => s.tick <= t).map(s =>
+      ({{lo: s.interval[0], hi: s.interval[1], bucket: s.exposure_bucket}}));
+    const clue = (fog.clues.find(c => c.tick === t) || {{}}).clue;
+    drawFogline($('fogcv2'), {{name: fog.isl.name, domain: fog.isl.domain,
+      tick: pos.reveal ? fog.N : t, n_ticks: fog.N,
+      clue: pos.reveal ? null : clue, stakes: stakes, hist: hist,
+      truth: pos.reveal ? fog.truth : null}});
+    $('clock').textContent = pos.reveal ? 'REVEAL' : 'tick ' + t + '/' + fog.N;
+    $('score').innerHTML = pos.reveal
+      ? `<span class="phase-running" style="font-size:20px">truth: ${{fog.truth}}</span>` : '';
+    const maxSeq = pos.reveal ? Infinity : (fog.closes[t] || 0);
+    commsUpTo(e => e.seq <= maxSeq);
   }} else {{
     const e = ticks[idx];
     $('clock').textContent = e ? '#' + e.seq + ' f' + e.frame : '';
@@ -573,6 +687,14 @@ def watch_page(game_id: str, code: str) -> str:
       <div class="score" id="convstatus" style="font-size:20px;margin:10px 0"></div>
       <table id="convgrid"></table>
     </div>
+    <div class="panel" id="fogbox" style="display:none">
+      <div class="sub">An island hides one number. Clues lift the fog
+      tick by tick; cartographers probe, then stake doubloons on
+      intervals. Bars on the shore strip are live stakes; gold line at
+      reveal is the truth.</div>
+      <div class="score" id="fogstatus" style="font-size:18px;margin:8px 0"></div>
+      <canvas id="fogcv" width="1000" height="460"></canvas>
+    </div>
     <div class="panel" id="viewbox"><h2>Public view</h2><pre id="view">…</pre></div>
     <div class="panel" id="resultbox" style="display:none;margin-top:16px">
       <h2>Result</h2><pre id="result"></pre></div>
@@ -587,6 +709,7 @@ def watch_page(game_id: str, code: str) -> str:
   </div>
 </div>
 <script>
+{_FOG_JS}
 const GAME = '{game_id}';
 const BASE = '/games/{game_id}/lobbies/{code}';
 const $ = id => document.getElementById(id);
@@ -624,6 +747,30 @@ function convBoard(st) {{
       + (secs !== null ? ` · closes in ${{secs}}s` : '');
   }}
 }}
+function fogBoard(st) {{
+  $('viewbox').style.display = 'none';
+  $('fogbox').style.display = 'block';
+  const v = st.view || {{}};
+  const isl = ((v.announcement || {{}}).island) || {{}};
+  const clues = v.clues_revealed || [];
+  const cur = clues[clues.length - 1];
+  const hist = new Array(10).fill(0);
+  ((v.flow || {{}}).per_tick || []).forEach(t =>
+    (t.interval_decile_hist || []).forEach((h, i) => hist[i] += h));
+  const stakes = ((v.flow || {{}}).recent_stakes || []).map(s =>
+    ({{lo: s.interval[0], hi: s.interval[1], bucket: s.bucket}}));
+  drawFogline($('fogcv'), {{name: isl.name, domain: isl.domain,
+    tick: v.tick, n_ticks: v.n_ticks, clue: cur && cur.clue,
+    stakes: stakes, hist: hist,
+    truth: st.result ? st.result.truth : null}});
+  const secs = st.deadline_utc ? Math.max(0, Math.round(
+    (new Date(st.deadline_utc) - Date.now()) / 1000)) : null;
+  $('fogstatus').innerHTML = st.result
+    ? (st.result.aborted ? '<span class="dim">island abandoned (restart)</span>'
+       : `<span class="phase-running">REVEALED</span> — truth ${{st.result.truth}}`)
+    : `tick ${{v.tick}}/${{v.n_ticks}}`
+      + (secs !== null ? ` · window closes in ${{secs}}s` : '');
+}}
 async function state() {{
   let st;
   try {{ st = await (await fetch(BASE + '/state')).json(); }}
@@ -634,6 +781,7 @@ async function state() {{
     + (st.phase === 'done'
        ? ` · <a href="/replay/${{GAME}}/{code}">▶ watch the replay</a>` : '');
   if (GAME === 'convergence') convBoard(st);
+  if (GAME === 'fogline') fogBoard(st);
   $('view').textContent = JSON.stringify(st.view, null, 1);
   $('comms').innerHTML = (st.comms||[]).slice(-25).map(m =>
     `<div><span class="dim">[${{m.channel}}]</span> <b>${{m.from}}</b> ${{m.text}}</div>`).join('')
