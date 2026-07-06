@@ -241,6 +241,26 @@ PY
   pkill -f "[u]vicorn manifold.app.*8896" 2>/dev/null || true
 }
 
+t9() {
+  echo "== T9 prang2: 5-axis paddles, variable force, replay symmetry =="
+  C=$(lobby prang2 '{"match_seconds":10,"expected_players":2}')
+  for n in pax quill; do python3 -m manifold_cli join "$S" prang2 --code "$C" --name "$n" >/dev/null; done
+  for n in pax quill; do pilot "$n" mock:paddle 3; done
+  sleep 13
+  curl -s "$S/games/prang2/lobbies/$C/log" > /dev/null   # touch to persist
+  LOG="$MANIFOLD_DATA/matches/prang2-$C/log.jsonl"
+  python3 -m manifold.games.prang2 --verify "$LOG" | tee "$WORK/replay2.txt"
+  grep -q "MATCH" "$WORK/replay2.txt"
+  python3 -m manifold_cli verify "$LOG"
+  python3 - "$LOG" <<'PY'
+import sys, json
+evs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+progs = [e for e in evs if e["kind"] == "program"]
+assert len(progs) > 20, f"paddles barely acted: {len(progs)}"
+print(f"T9 PASS: {len(progs)} programs, replay digest matches, chain ok")
+PY
+}
+
 boot
 case "${1:-all}" in
   t1) t1 ;;
@@ -249,7 +269,8 @@ case "${1:-all}" in
   t6) t6 ;;
   t7) t7 ;;
   t8) t8 ;;
-  all) t1; t2; t3; t6; t7; t8 ;;
+  t9) t9 ;;
+  all) t1; t2; t3; t6; t7; t8; t9 ;;
 esac
 pkill -f "[u]vicorn manifold.app.*$PORT" 2>/dev/null || true
 echo "ALL SELECTED TESTS PASSED"

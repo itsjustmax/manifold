@@ -23,6 +23,7 @@ from .kit import Game, KitError, Lobby, iso, new_code, now, verify_chain
 from .games.convergence import Convergence
 from .games.fogline_game import Fogline
 from .games.prang import Prang
+from .games.prang2 import Prang2
 from .mesh import Mesh
 from .paths import data_dir
 from .recover import recover_live
@@ -38,7 +39,8 @@ app = FastAPI(title="Manifold", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST"], allow_headers=["*"])
 
-GAMES: dict[str, type[Game]] = {g.ID: g for g in (Convergence, Fogline, Prang)}
+GAMES: dict[str, type[Game]] = {g.ID: g for g in
+                                (Convergence, Fogline, Prang, Prang2)}
 LOBBIES: dict[tuple[str, str], Lobby] = {}
 
 MAX_OPEN_LOBBIES = 100      # public-tunnel abuse cap, not a scale target

@@ -33,7 +33,8 @@ def make_decider(spec: str):
                 "fogline-brash": MockFoglineBrash,
                 "fogline-measured": MockFoglineMeasured,
                 "prang-chase": MockPrangChase,
-                "prang-striker": MockPrangStriker}[arg]()
+                "prang-striker": MockPrangStriker,
+                "paddle": MockPaddle}[arg]()
     if kind == "cmd":
         return CmdDecider(arg)
     if kind == "proc":
@@ -269,6 +270,47 @@ class CmdDecider:
 
     def reflect(self, ctx):
         return self._call({"mode": "reflect", **ctx})
+
+
+class MockPaddle:
+    """Prang II rally mind: hold station in x, track the served arc in
+    y/z, keep the face aimed at the goal window, strike hard when the
+    ball is close and soft-position otherwise."""
+
+    def decide(self, ctx):
+        v = ctx["view"]
+        you, ball = v.get("you"), v.get("ball")
+        if not you or not ball:
+            return {"action": "none"}
+        arc = ball.get("arc") or {}
+        far = abs(ball["x"] - you["x"]) > 400
+        t = (arc.get("f30") if far and arc.get("f30")
+             else [ball["x"], ball["y"], ball["z"]])
+        g = v.get("goal_you_attack") or {}
+        gx = float(g.get("x", 0.0))
+        gy = sum(g.get("y_range", [600, 600])) / 2
+        gz = sum(g.get("z_range", [400, 400])) / 2
+        station = 300.0 if gx > 1000 else 1700.0
+        # swing THROUGH the ball when it's close — paddle velocity
+        # transfers into the shot; camping the station hits nothing
+        tx = ball["x"] if abs(ball["x"] - you["x"]) < 320 else station
+        vx = max(-420.0, min(420.0, (tx - you["x"]) * 4))
+        vy = max(-420.0, min(420.0, (t[1] - you["y"]) * 4))
+        vz = max(-420.0, min(420.0, (t[2] - you["z"]) * 4))
+        dx = gx - you["x"]
+        yaw = math.degrees(math.atan2(gy - you["y"], dx))
+        pitch = max(-89.0, min(89.0, math.degrees(
+            math.atan2(gz - you["z"], abs(dx)))))
+        near = abs(ball["x"] - you["x"]) < 350
+        return {"action": "program",
+                "segments": [{"ms": 250, "vx": round(vx, 1),
+                              "vy": round(vy, 1), "vz": round(vz, 1),
+                              "yaw": round(yaw, 1), "pitch": round(pitch, 1),
+                              "force": 95 if near else 40}],
+                "reasoning": "track the arc, face the window"}
+
+    def reflect(self, ctx):
+        return None
 
 
 # ------------------------------------------------------------ fast minds

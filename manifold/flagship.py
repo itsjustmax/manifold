@@ -39,6 +39,9 @@ def exhibit_for(game: str, minds: str | None) -> dict:
         ts = 90 if cli else 45
         return {"params": {"tick_seconds": ts, "expected_players": 3},
                 "timeout": ts * 6 + 120}
+    if game == "prang2":
+        return {"params": {"match_seconds": 120, "expected_players": 2},
+                "timeout": 120 + 90}
     return {"params": {"match_seconds": 120, "expected_players": 4},
             "timeout": 120 + 90}
 
@@ -99,6 +102,8 @@ def seats_for(game: str, minds: str | None) -> list[tuple[str, float | None]]:
         return ([(minds, None)] * 3 if minds else
                 [("mock:fogline-brash", None), ("mock:fogline-measured", None),
                  ("mock:hold", None)])
+    if game == "prang2":
+        return [("mock:paddle", 3)] * 2
     if minds and minds.startswith("anthropic:"):
         return [(minds, 0.5), ("mock:prang-striker", 3),
                 (minds, 0.5), ("mock:prang-striker", 3)]
@@ -167,7 +172,7 @@ def main() -> int:
                     help="seconds between matches (default 90)")
     ap.add_argument("--cycles", type=int, default=0,
                     help="stop after N matches (0 = run forever)")
-    ap.add_argument("--games", default="convergence,prang,fogline")
+    ap.add_argument("--games", default="convergence,prang,fogline,prang2")
     ap.add_argument("--minds", metavar="DECIDER",
                     help="house minds for turn games: claude-code[:model] "
                          "or codex[:model] (plan-billed, NO API key), or "
@@ -177,7 +182,7 @@ def main() -> int:
     a = ap.parse_args()
 
     server = a.server.rstrip("/")
-    known = ("convergence", "prang", "fogline")
+    known = ("convergence", "prang", "fogline", "prang2")
     games = [g.strip() for g in a.games.split(",") if g.strip() in known]
     if not games:
         sys.exit(f"no known games in --games; choose from {list(known)}")

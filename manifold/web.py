@@ -19,6 +19,66 @@ REPO_DEFAULT = "https://github.com/itsjustmax/manifold"
 # cloud as ticks pass. Below the scene: the answer domain as a shore
 # strip with the stake intervals, the crowd's decile histogram, and at
 # reveal, the golden truth line.
+# Shared Prang II renderer: oblique 3D projection onto the 2D canvas.
+# D = {arena:[X,Y,Z], gy:[..], gz:[..], ball:[x,y,z],
+#      paddles:[{name,team,x,y,z,yaw,pitch}], score:{west,east}}
+_P2_JS = r"""
+function p2proj(A, cw, ch){
+  return (x,y,z) => [60 + (x/A[0])*(cw-170) + (y/A[1])*52,
+                     (ch-64) - (z/A[2])*(ch-168) - (y/A[1])*44];
+}
+function drawP2(cv, D){
+  const cx = cv.getContext('2d'), A = D.arena;
+  cx.clearRect(0,0,cv.width,cv.height);
+  const P = p2proj(A, cv.width, cv.height);
+  const line = (a,b,st) => { cx.strokeStyle=st||'#1f2b4d'; cx.beginPath();
+    cx.moveTo(...a); cx.lineTo(...b); cx.stroke(); };
+  const C = [[0,0,0],[A[0],0,0],[A[0],A[1],0],[0,A[1],0],
+             [0,0,A[2]],[A[0],0,A[2]],[A[0],A[1],A[2]],[0,A[1],A[2]]]
+            .map(c => P(...c));
+  cx.lineWidth = 1;
+  [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],
+   [0,4],[1,5],[2,6],[3,7]].forEach(([a,b]) => line(C[a], C[b]));
+  // floor grid hint + halfway plane
+  line(P(A[0]/2,0,0), P(A[0]/2,A[1],0), '#16203c');
+  line(P(A[0]/2,0,A[2]), P(A[0]/2,A[1],A[2]), '#16203c');
+  // goal windows on both end walls
+  for (const gx of [0, A[0]]) {
+    cx.strokeStyle = '#ffd166'; cx.lineWidth = 2;
+    cx.beginPath();
+    const g = [[gx,D.gy[0],D.gz[0]],[gx,D.gy[1],D.gz[0]],
+               [gx,D.gy[1],D.gz[1]],[gx,D.gy[0],D.gz[1]]].map(c=>P(...c));
+    cx.moveTo(...g[0]); g.slice(1).forEach(p=>cx.lineTo(...p));
+    cx.closePath(); cx.stroke();
+  }
+  cx.lineWidth = 1;
+  // ball shadow on the floor, then the ball (size hints depth)
+  const [bx,by,bz] = D.ball;
+  const sh = P(bx,by,0);
+  cx.fillStyle = 'rgba(0,0,0,0.45)';
+  cx.beginPath(); cx.ellipse(sh[0],sh[1],9,3.5,0,0,7); cx.fill();
+  const bp = P(bx,by,bz), br = 5 + 4*(1 - by/A[1]);
+  cx.fillStyle = '#fff';
+  cx.beginPath(); cx.arc(bp[0],bp[1],br,0,7); cx.fill();
+  // paddles: disc + face-normal spike (your aim, visible)
+  for (const p of D.paddles) {
+    const pp = P(p.x,p.y,p.z);
+    const psh = P(p.x,p.y,0);
+    cx.fillStyle = 'rgba(0,0,0,0.30)';
+    cx.beginPath(); cx.ellipse(psh[0],psh[1],12,4,0,0,7); cx.fill();
+    cx.fillStyle = p.team === 'west' ? '#4da3ff' : '#ff9d4d';
+    cx.beginPath(); cx.ellipse(pp[0],pp[1],15,10,0,0,7); cx.fill();
+    const ya = p.yaw*Math.PI/180, pi = p.pitch*Math.PI/180;
+    const n = [Math.cos(pi)*Math.cos(ya), Math.cos(pi)*Math.sin(ya),
+               Math.sin(pi)];
+    const tip = P(p.x + n[0]*130, p.y + n[1]*130, p.z + n[2]*130);
+    line(pp, tip, '#dbe4ff');
+    cx.fillStyle = '#dbe4ff'; cx.font = '11px monospace';
+    cx.fillText(p.name, pp[0]+14, pp[1]-10);
+  }
+}
+"""
+
 _FOG_JS = r"""
 function mulberry(seed){let t=seed>>>0;return()=>{t+=0x6D2B79F5;let r=Math.imul(t^t>>>15,1|t);r^=r+Math.imul(r^r>>>7,61|r);return((r^r>>>14)>>>0)/4294967296;};}
 function hashStr(s){let h=2166136261;for(const c of String(s)){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
@@ -515,6 +575,7 @@ select {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
 </div>
 <script>
 {_FOG_JS}
+{_P2_JS}
 const GAME = '{game_id}', CODE = '{code}';
 const $ = id => document.getElementById(id);
 let R = null, idx = 0, playing = false, spd = 1, timer = null;
@@ -579,7 +640,17 @@ function render() {{
   if (mode === 'prang') {{
     const fr = ticks[idx];
     $('clock').textContent = 't+' + (fr.f / 60).toFixed(1) + 's';
-    drawFrame(fr);
+    if (R.frames.kind === 'prang2') {{
+      drawP2($('field'), {{arena: R.frames.arena, gy: R.frames.goal_y,
+        gz: R.frames.goal_z, ball: fr.b,
+        paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
+          team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
+          yaw: p[3], pitch: p[4]}}))}});
+      $('score').innerHTML = `<span class="w">west ${{fr.s.west}}</span>
+        <span class="dim">—</span> <span class="e">${{fr.s.east}} east</span>`;
+    }} else {{
+      drawFrame(fr);
+    }}
     commsUpTo(e => e.frame <= fr.f);
   }} else if (mode === 'conv') {{
     $('clock').textContent = 'round ' + (idx + 1) + '/' + ticks.length;
@@ -710,6 +781,7 @@ def watch_page(game_id: str, code: str) -> str:
 </div>
 <script>
 {_FOG_JS}
+{_P2_JS}
 const GAME = '{game_id}';
 const BASE = '/games/{game_id}/lobbies/{code}';
 const $ = id => document.getElementById(id);
@@ -835,7 +907,16 @@ async function broadcast() {{
       realtime = true;
       $('fieldbox').style.display = 'block';
       $('viewbox').style.display = 'none';
-      draw(w.frame);
+      const f = w.frame;
+      if (f.kind === 'prang2') {{
+        drawP2($('field'), {{arena: f.arena, gy: f.goal_y, gz: f.goal_z,
+          ball: [f.ball.x, f.ball.y, f.ball.z], paddles: f.paddles}});
+        $('score').innerHTML = `<span class="w">west ${{f.score.west}}</span>
+          <span class="dim">—</span> <span class="e">${{f.score.east}} east</span>
+          <span class="sub" style="font-size:13px">· ${{Math.ceil(f.frames_left/60)}}s left</span>`;
+      }} else {{
+        draw(f);
+      }}
     }}
   }} catch (e) {{}}
   setTimeout(broadcast, realtime && !done ? 100 : 2000);
