@@ -33,7 +33,10 @@ function drawP2(cv, D){
   const cx = cv.getContext('2d'), A = D.arena;
   const cw = cv.width, ch = cv.height;
   cx.clearRect(0,0,cw,ch);
-  const [Bx,By,Bz] = D.ball;
+  const balls = D.balls || (D.ball ? [D.ball] : []);
+  const Bx = balls.reduce((s,b)=>s+b[0],0)/(balls.length||1);
+  const By = balls.reduce((s,b)=>s+b[1],0)/(balls.length||1);
+  const Bz = balls.reduce((s,b)=>s+b[2],0)/(balls.length||1);
   if (P2LOOK.x === null) P2LOOK = {x:Bx, y:By, z:Bz};
   P2LOOK.x += (Bx-P2LOOK.x)*0.12; P2LOOK.y += (By-P2LOOK.y)*0.12;
   P2LOOK.z += (Bz-P2LOOK.z)*0.12;
@@ -90,10 +93,11 @@ function drawP2(cv, D){
     for(let i=0;i<4;i++) seg(g[i],g[(i+1)%4],'#ffd166');
     cx.lineWidth=1;
   }
-  const vb=view([Bx,By,Bz]);
-  if (vb[2]>NEAR){
+  for (const bl of balls){
+    const vb=view(bl);
+    if (vb[2]<=NEAR) continue;
     const br=Math.max(4, Math.min(90, (D.ball_r||A[2]*0.015)*FL/vb[2]));
-    const shp=P(Bx,By,0);
+    const shp=P(bl[0],bl[1],0);
     if (shp){cx.fillStyle='rgba(0,0,0,0.45)';
       cx.beginPath(); cx.ellipse(shp[0],shp[1],br*0.9,br*0.32,0,0,7);
       cx.fill();}
@@ -151,8 +155,11 @@ function drawP2(cv, D){
     cx.fillStyle = p.team==='west' ? '#4da3ff' : '#ff9d4d';
     cx.fillRect(m[0]-2,m[1]-2,4,4);
   }
-  const mb=M(Bx,By);
-  cx.fillStyle='#fff'; cx.beginPath(); cx.arc(mb[0],mb[1],3,0,7); cx.fill();
+  cx.fillStyle='#fff';
+  for (const bl of balls){
+    const mb=M(bl[0],bl[1]);
+    cx.beginPath(); cx.arc(mb[0],mb[1],3,0,7); cx.fill();
+  }
   // camera position hint on the minimap
   const mc=M(Math.max(0,Math.min(A[0],C[0])), Math.max(0,Math.min(A[1],C[1])));
   cx.strokeStyle='#dbe4ff';
@@ -727,7 +734,7 @@ function render() {{
       $('camb2').style.display = 'inline-block';
       drawP2($('field'), {{arena: R.frames.arena, gy: R.frames.goal_y,
         gz: R.frames.goal_z, pad: R.frames.pad, ball_r: R.frames.ball_r,
-        ball: fr.b,
+        balls: Array.isArray(fr.b[0]) ? fr.b : [fr.b],
         paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
           team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
           yaw: p[3], pitch: p[4]}}))}});
@@ -1001,7 +1008,7 @@ async function broadcast() {{
         $('camb').style.display = 'inline-block';
         drawP2($('field'), {{arena: f.arena, gy: f.goal_y, gz: f.goal_z,
           pad: f.pad, ball_r: f.ball_r,
-          ball: [f.ball.x, f.ball.y, f.ball.z],
+          balls: f.balls || [[f.ball.x, f.ball.y, f.ball.z]],
           paddles: f.paddles}});
         $('score').innerHTML = `<span class="w">west ${{f.score.west}}</span>
           <span class="dim">—</span> <span class="e">${{f.score.east}} east</span>

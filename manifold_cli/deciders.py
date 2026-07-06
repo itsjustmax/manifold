@@ -279,9 +279,17 @@ class MockPaddle:
 
     def decide(self, ctx):
         v = ctx["view"]
-        you, ball = v.get("you"), v.get("ball")
-        if not you or not ball:
+        you = v.get("you")
+        balls = v.get("balls") or ([v["ball"]] if v.get("ball") else [])
+        if not you or not balls:
             return {"action": "none"}
+        # play the nearest ball the rules let me touch; if none are
+        # legal for me, shadow the nearest anyway (positioning)
+        def dist(b):
+            return (abs(b["x"] - you["x"]) + abs(b["y"] - you["y"])
+                    + abs(b["z"] - you["z"]))
+        legal = [b for b in balls if b.get("you_may_touch", True)]
+        ball = min(legal or balls, key=dist)
         # scale-free: everything keys off the served arena dims
         A = v.get("arena") or [4000000.0, 2400000.0, 1600000.0]
         X = float(A[0])
