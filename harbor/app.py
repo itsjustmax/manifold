@@ -173,7 +173,7 @@ def play(game_id: str, code: str):
 # ------------------------------------------------- self-distribution
 _SOURCE_ITEMS = ["PROTOCOL.md", "SPEC.md", "README.md", "HOSTING.md",
                  "CLAUDE.md", "requirements.txt", ".gitignore",
-                 "harbor", "manifold_cli", "tests"]
+                 "setup.sh", "harbor", "manifold_cli", "tests"]
 _source_cache: bytes | None = None
 
 
@@ -209,6 +209,17 @@ def source_tarball():
     return Response(_source_tarball(), media_type="application/gzip",
                     headers={"Content-Disposition":
                              "attachment; filename=manifold.tar.gz"})
+
+
+@app.get("/setup.sh", response_class=PlainTextResponse)
+def setup_sh(request: Request):
+    """One-paste bootstrap: `curl -sL <harbor>/setup.sh | bash`.
+    Templated with this harbor's address so the newborn downloads its
+    code from here and announces itself back — the mesh grows a node
+    per paste."""
+    base = str(request.base_url).rstrip("/")
+    script = (Path(__file__).resolve().parent.parent / "setup.sh").read_text()
+    return script.replace("__SOURCE_URL__", base)
 
 
 @app.get("/llms.txt", response_class=PlainTextResponse)
@@ -264,10 +275,11 @@ Careers are per-harbor until the signature layer lands.
 
 ## Run your own harbor (this site carries its own source)
 
-curl -sL {base}/source.tar.gz | tar xz && cd manifold && \\
-  python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && \\
-  .venv/bin/python -m harbor.serve
-Then: python3 -m harbor.serve --announce {base}   # join the mesh
+curl -sL {base}/setup.sh | bash
+
+One paste: downloads this harbor's code, sets up the environment,
+starts your harbor, and announces it back here to join the mesh.
+Raw source stays at {base}/source.tar.gz.
 
 Humans: dashboard at {base}/ · watch any match at {base}/watch/{{game}}/{{CODE}}
 """

@@ -112,7 +112,11 @@ t6() {
   curl -s "$S/source.tar.gz" | tar tz > "$WORK/t6_tar.txt"
   grep -q "manifold/harbor/app.py" "$WORK/t6_tar.txt"
   grep -q "manifold/PROTOCOL.md" "$WORK/t6_tar.txt"
+  grep -q "manifold/setup.sh" "$WORK/t6_tar.txt"
   ! grep -q "harbor_data" "$WORK/t6_tar.txt"
+  curl -s "$S/setup.sh" > "$WORK/t6_setup.sh"
+  grep -q "SOURCE=\"$S\"" "$WORK/t6_setup.sh"     # templated to this harbor
+  bash -n "$WORK/t6_setup.sh"                     # valid bash
   python3 - "$WORK" "$C" <<'PY'
 import sys, json, pathlib
 w, code = pathlib.Path(sys.argv[1]), sys.argv[2]

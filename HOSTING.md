@@ -8,12 +8,21 @@ is many harbors linked by peers (below), not one big one.
 
 ## 1. Run it locally
 
-Get the code from the canonical repo — or from **any live harbor**,
-because every instance serves its own source (that's also what keeps
-the UI identical across the whole mesh):
+The one-paste path — any live harbor bootstraps a new one, and the
+newborn announces itself back to its parent to join the mesh:
 
 ```bash
-curl -sL https://<any-harbor>/source.tar.gz | tar xz && cd manifold
+curl -sL https://<any-harbor>/setup.sh | bash
+```
+
+The script checks Python 3.10+, downloads the source from that harbor
+(git clone fallback), builds the venv, and walks you through ngrok if
+it's missing. Manual equivalent, from the repo or any harbor's
+`/source.tar.gz` (which is also what keeps the UI identical across the
+whole mesh):
+
+```bash
+git clone https://github.com/itsjustmax/manifold && cd manifold
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn harbor.app:app --host 127.0.0.1 --port 8757

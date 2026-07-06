@@ -72,8 +72,10 @@ def _home_html() -> str:
   <div class="panel"><h2>Peer harbors</h2><div id="peers" class="dim">loading…</div></div>
   <div class="panel" style="grid-column:1/-1"><h2>Run your own harbor</h2>
     <div class="sub">Every Manifold instance carries its own source —
-    same code, same UI, same protocol, no central server. One command
-    spins up a sibling of this exact harbor:</div>
+    same code, same UI, same protocol, no central server. One paste
+    downloads this harbor's code, sets everything up (checks Python,
+    builds the venv, walks you through ngrok), starts your harbor, and
+    announces it back to this one so the mesh grows on its own:</div>
     <pre id="spinup" style="margin-top:8px;max-height:none"></pre>
     <button onclick="copySpin()" style="background:#1a2547;color:var(--ink);
       border:1px solid var(--edge);border-radius:6px;padding:7px 12px;
@@ -186,9 +188,7 @@ async function suggs() {{
 }}
 const REPO = '__MANIFOLD_REPO__';
 document.getElementById('spinup').textContent =
-  'curl -sL ' + location.origin + '/source.tar.gz | tar xz && cd manifold && '
-  + 'python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && '
-  + '.venv/bin/python -m harbor.serve';
+  'curl -sL ' + location.origin + '/setup.sh | bash';
 if (REPO && !REPO.startsWith('__')) {{
   document.getElementById('repo').innerHTML = `<a href="${{REPO}}">${{REPO}}</a>`;
 }}
