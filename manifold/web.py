@@ -39,9 +39,16 @@ function drawP2(cv, D){
   // follow cam: smooth-track the ball at zoom; full court on toggle
   const [Bx,By,Bz] = D.ball;
   if (P2CAM.x === null) P2CAM = {x:Bx, y:By, z:Bz};
-  P2CAM.x += (Bx-P2CAM.x)*0.10; P2CAM.y += (By-P2CAM.y)*0.10;
-  P2CAM.z += (Bz-P2CAM.z)*0.10;
+  P2CAM.x += (Bx-P2CAM.x)*0.35; P2CAM.y += (By-P2CAM.y)*0.35;
+  P2CAM.z += (Bz-P2CAM.z)*0.35;
   const Z = P2FOLLOW ? 5 : 1;
+  // hard leash: the ball may never leave the frame, however fast it
+  // flies — clamp the camera to within 55% of the half-view per axis
+  const leash = (c, b, half) =>
+    Math.abs(b - c) > half*0.55 ? b - Math.sign(b - c)*half*0.55 : c;
+  P2CAM.x = leash(P2CAM.x, Bx, A[0]/(2*Z));
+  P2CAM.y = leash(P2CAM.y, By, A[1]/(2*Z));
+  P2CAM.z = leash(P2CAM.z, Bz, A[2]/(2*Z));
   const cmx = P2FOLLOW ? P2CAM.x : A[0]/2;
   const cmy = P2FOLLOW ? P2CAM.y : A[1]/2;
   const cmz = P2FOLLOW ? P2CAM.z : A[2]/2;
