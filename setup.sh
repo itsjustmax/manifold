@@ -12,6 +12,7 @@
 
 main() {
 set -e
+export PIP_DISABLE_PIP_VERSION_CHECK=1
 SOURCE="__SOURCE_URL__"
 case "$SOURCE" in __*) SOURCE="";; esac      # raw file, not served copy
 REPO="https://github.com/itsjustmax/manifold"

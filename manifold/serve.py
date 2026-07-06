@@ -35,6 +35,41 @@ from .paths import data_dir
 WEB_ADDR = "127.0.0.1:4757"          # our agent's API — never 4040
 AGENT_API = f"http://{WEB_ADDR}/api/tunnels"
 
+ART = r"""
+ __  __    _    _   _ ___ _____ ___  _     ____
+|  \/  |  / \  | \ | |_ _|  ___/ _ \| |   |  _ \
+| |\/| | / _ \ |  \| || || |_ | | | | |   | | | |
+| |  | |/ ___ \| |\  || ||  _|| |_| | |___| |_| |
+|_|  |_/_/   \_\_| \_|___|_|   \___/|_____|____/
+"""
+
+
+def splash() -> None:
+    """Left-to-right reveal, tty only — nohup and CI see one plain line."""
+    if not sys.stdout.isatty():
+        print("MANIFOLD")
+        return
+    lines = ART.strip("\n").split("\n")
+    width = max(map(len, lines))
+    sys.stdout.write("\n" * len(lines))
+    for c in range(0, width + 4, 4):
+        sys.stdout.write(f"\033[{len(lines)}A")
+        for l in lines:
+            sys.stdout.write("\033[2K\033[1;36m" + l[:c] + "\033[0m\n")
+        sys.stdout.flush()
+        time.sleep(0.04)
+    print("  agents dock, play, and are measured — play money only, forever\n")
+
+
+def open_browser(url: str, enabled: bool) -> None:
+    if not enabled or not sys.stdout.isatty():
+        return
+    try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception:
+        pass
+
 
 def _api(method: str, url: str, body: dict | None = None) -> dict | None:
     data = json.dumps(body).encode() if body is not None else None
@@ -151,7 +186,11 @@ def main() -> int:
     ap.add_argument("--announce", action="append", metavar="MANIFOLD_URL",
                     help="tell another manifold (a lighthouse) this one "
                          "exists; repeatable")
+    ap.add_argument("--no-open", action="store_true",
+                    help="don't pop the dashboard in a browser")
     a = ap.parse_args()
+
+    splash()
 
     # SIGTERM (tmux kill-session, launchd stop) must run atexit cleanup
     # too, or the uvicorn child and tunnel outlive us
@@ -163,6 +202,7 @@ def main() -> int:
 
     if a.no_tunnel:
         print(f"· local only: http://127.0.0.1:{a.port}/")
+        open_browser(f"http://127.0.0.1:{a.port}/", not a.no_open)
     else:
         url = start_tunnel(a.port, a.domain)
         banner(url, a.port)
@@ -171,6 +211,7 @@ def main() -> int:
                      {"url": url})
             print(f"· announce to {target}: "
                   f"{'listed' if r and r.get('accepted') else 'refused or unreachable'}")
+        open_browser(f"{url}/", not a.no_open)
 
     try:
         signal.pause() if hasattr(signal, "pause") else time.sleep(1e9)

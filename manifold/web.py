@@ -370,9 +370,19 @@ def watch_page(game_id: str, code: str) -> str:
       <div class="score" id="score"></div>
       <canvas id="field" width="1000" height="600"></canvas>
     </div>
+    <div class="panel" id="convbox" style="display:none">
+      <div class="sub">One rule: every player must say the <b>same word</b>
+      in the same round. No talking — the reveal history is the only
+      signal. Converge sooner, score more.</div>
+      <div class="score" id="convstatus" style="font-size:20px;margin:10px 0"></div>
+      <table id="convgrid"></table>
+    </div>
     <div class="panel" id="viewbox"><h2>Public view</h2><pre id="view">…</pre></div>
     <div class="panel" id="resultbox" style="display:none;margin-top:16px">
       <h2>Result</h2><pre id="result"></pre></div>
+    <div class="panel" style="margin-top:16px"><details>
+      <summary class="sub" style="cursor:pointer">what is this game? (rulebook)</summary>
+      <pre id="rules">loading…</pre></details></div>
   </div>
   <div>
     <div class="panel"><h2>Comms</h2>
@@ -381,9 +391,43 @@ def watch_page(game_id: str, code: str) -> str:
   </div>
 </div>
 <script>
+const GAME = '{game_id}';
 const BASE = '/games/{game_id}/lobbies/{code}';
 const $ = id => document.getElementById(id);
 let realtime = false, done = false;
+fetch('/games/' + GAME + '/rulebook.md').then(r => r.text())
+  .then(t => {{ $('rules').textContent = t; }});
+function convBoard(st) {{
+  $('viewbox').style.display = 'none';
+  $('convbox').style.display = 'block';
+  const v = st.view || {{}};
+  const players = (v.players && v.players.length)
+    ? v.players : (st.players || []).map(p => p.name);
+  let rows = '<tr><th></th>'
+    + players.map(p => `<th>${{p}}</th>`).join('') + '</tr>';
+  for (const h of (v.history || [])) {{
+    const words = players.map(p => (h.words || {{}})[p] ?? '');
+    const hit = words.length && words[0] !== '...' &&
+      words.every(w => w.toLowerCase() === words[0].toLowerCase());
+    rows += `<tr${{hit ? ' style="background:#33290a"' : ''}}>`
+      + `<td class="dim">r${{h.round}}</td>`
+      + words.map(w => w === '...'
+          ? '<td class="dim">· · ·</td>'
+          : `<td><b>${{w}}</b>${{hit ? ' ✦' : ''}}</td>`).join('') + '</tr>';
+  }}
+  $('convgrid').innerHTML = rows;
+  if (st.result) {{
+    $('convstatus').innerHTML = st.result.converged
+      ? `<span class="phase-running">CONVERGED</span> in round ${{st.result.round}} — ${{st.result.score_each}} points each`
+      : '<span class="dim">never converged — the table scores 0</span>';
+  }} else {{
+    const secs = st.deadline_utc ? Math.max(0, Math.round(
+      (new Date(st.deadline_utc) - Date.now()) / 1000)) : null;
+    $('convstatus').innerHTML =
+      `round ${{v.round || '—'}}/${{v.max_rounds || 8}} · ${{v.committed_count || 0}}/${{players.length}} words in`
+      + (secs !== null ? ` · closes in ${{secs}}s` : '');
+  }}
+}}
 async function state() {{
   let st;
   try {{ st = await (await fetch(BASE + '/state')).json(); }}
@@ -391,6 +435,7 @@ async function state() {{
   $('status').innerHTML = `phase <b class="phase-${{st.phase}}">${{st.phase}}</b>
     · frame ${{st.frame}} · aboard: ${{(st.players||[]).map(p=>p.name).join(', ')}}`
     + (st.deadline_utc ? ` · window closes ${{st.deadline_utc}}` : '');
+  if (GAME === 'convergence') convBoard(st);
   $('view').textContent = JSON.stringify(st.view, null, 1);
   $('comms').innerHTML = (st.comms||[]).slice(-25).map(m =>
     `<div><span class="dim">[${{m.channel}}]</span> <b>${{m.from}}</b> ${{m.text}}</div>`).join('')

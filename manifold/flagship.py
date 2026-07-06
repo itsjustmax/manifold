@@ -30,17 +30,42 @@ ROSTER = ["aster", "briar", "cove", "dune", "ember", "flint"]
 EXHIBITS = {
     "convergence": {
         "params": {"round_seconds": 30, "expected_players": 3},
-        "timeout": 30 * 8 + 60,
+        "timeout": 30 * 8 + 120,      # worst case all 8 rounds + latency
     },
     "fogline": {
         "params": {"tick_seconds": 45, "expected_players": 3},
-        "timeout": 45 * 6 + 90,
+        "timeout": 45 * 6 + 120,
     },
     "prang": {
         "params": {"match_seconds": 120, "expected_players": 4},
-        "timeout": 120 + 60,
+        "timeout": 120 + 90,
     },
 }
+
+
+def preflight_anthropic(model: str) -> None:
+    """One 1-token call before seating real minds. A dead key otherwise
+    fails silently inside the pilots and the flagship plays entire
+    matches of nothing but missed windows — learned the hard way."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        sys.exit("[flagship] --anthropic needs ANTHROPIC_API_KEY in the "
+                 "environment (keys never travel; this stays client-side)")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps({"model": model, "max_tokens": 1,
+                         "messages": [{"role": "user", "content": "ping"}]
+                         }).encode(), method="POST")
+    req.add_header("x-api-key", key)
+    req.add_header("anthropic-version", "2023-06-01")
+    req.add_header("content-type", "application/json")
+    try:
+        urllib.request.urlopen(req, timeout=20).read()
+    except urllib.error.HTTPError as e:
+        sys.exit(f"[flagship] anthropic preflight FAILED (HTTP {e.code}): "
+                 f"{e.read().decode()[:300]}\n"
+                 "fix the key or credits before seating real minds")
+    print(f"[flagship] anthropic preflight ok: {model} answers")
 
 
 def seats_for(game: str, anthropic: str | None) -> list[tuple[str, float | None]]:
@@ -80,6 +105,8 @@ def run_match(server: str, game: str, spec: dict, env: dict,
                 {"params": spec["params"]})["code"]
     print(f"[flagship] {game} {code} — curtain up "
           f"({server}/watch/{game}/{code})")
+    logdir = os.path.join(env["MANIFOLD_HOME"], "logs")
+    os.makedirs(logdir, exist_ok=True)
     pilots = []
     for i, (decider, hz) in enumerate(seats_for(game, anthropic)):
         name = ROSTER[i]
@@ -90,9 +117,9 @@ def run_match(server: str, game: str, spec: dict, env: dict,
                "--decider", decider]
         if hz:
             cmd += ["--hz", str(hz)]
-        pilots.append(subprocess.Popen(cmd, env=env,
-                                       stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.DEVNULL))
+        log = open(os.path.join(logdir, f"{name}.log"), "a")
+        pilots.append((subprocess.Popen(cmd, env=env, stdout=log,
+                                        stderr=subprocess.STDOUT), log))
     deadline = time.time() + spec["timeout"]
     result = None
     while time.time() < deadline:
@@ -104,9 +131,14 @@ def run_match(server: str, game: str, spec: dict, env: dict,
         except Exception:
             pass
         time.sleep(5)
-    for p in pilots:
+    # pilots reflect AFTER done (that's the learning); give them room
+    grace = time.time() + 90
+    for p, log in pilots:
+        while p.poll() is None and time.time() < grace:
+            time.sleep(2)
         if p.poll() is None:
             p.terminate()
+        log.close()
     print(f"[flagship] {game} {code} — "
           f"{json.dumps(result)[:140] if result else 'timed out (pilots reaped)'}")
 
@@ -130,6 +162,7 @@ def main() -> int:
     if not games:
         sys.exit(f"no known games in --games; choose from {list(EXHIBITS)}")
     if a.anthropic:
+        preflight_anthropic(a.anthropic)
         print(f"[flagship] house minds: anthropic:{a.anthropic} — this "
               "spends real credits continuously; Ctrl-C is the off switch")
     env = {**os.environ,

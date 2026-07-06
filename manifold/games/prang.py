@@ -27,6 +27,35 @@ DRAG, BALL_DRAG = 0.98, 0.992
 WALL_BOUNCE = 0.85
 KICK_DIST, KICK_IMPULSE = 38.0, 7.0
 MAX_PROGRAM_MS, MAX_SEGMENTS = 1000, 5
+CORNER_CUT = 150.0          # 45° corner bevels: nothing wedges flush
+_SQRT2 = 2.0 ** 0.5
+
+
+def _bevel(o: dict, r: float, bounce: float) -> None:
+    """Deflect a circle of radius r off the four 45° corner cuts.
+    Local frame per corner: lu, lv grow toward the field; the cut is
+    the line lu + lv = CORNER_CUT."""
+    for cx, cy in ((0.0, 0.0), (0.0, FIELD_H),
+                   (FIELD_W, 0.0), (FIELD_W, FIELD_H)):
+        su = 1.0 if cx == 0.0 else -1.0
+        sv = 1.0 if cy == 0.0 else -1.0
+        lu, lv = su * (o["x"] - cx), sv * (o["y"] - cy)
+        if lu > CORNER_CUT or lv > CORNER_CUT:
+            continue
+        need = CORNER_CUT + r * _SQRT2
+        s = lu + lv
+        if s >= need:
+            continue
+        push = (need - s) / 2.0
+        lu += push
+        lv += push
+        vlu, vlv = su * o["vx"], sv * o["vy"]
+        vn = (vlu + vlv) / 2.0          # velocity into the cut, halved
+        if vn < 0:
+            vlu -= (1.0 + bounce) * vn
+            vlv -= (1.0 + bounce) * vn
+        o["x"], o["y"] = cx + su * lu, cy + sv * lv
+        o["vx"], o["vy"] = su * vlu, sv * vlv
 
 
 # ---------------------------------------------------------------- world
@@ -94,6 +123,7 @@ def physics_step(world: dict) -> str | None:
         if v["x"] > FIELD_W - VESSEL_R: v["x"], v["vx"] = FIELD_W - VESSEL_R, 0.0
         if v["y"] < VESSEL_R: v["y"], v["vy"] = VESSEL_R, 0.0
         if v["y"] > FIELD_H - VESSEL_R: v["y"], v["vy"] = FIELD_H - VESSEL_R, 0.0
+        _bevel(v, VESSEL_R, 0.0)
         dx, dy = b["x"] - v["x"], b["y"] - v["y"]
         dist = math.hypot(dx, dy)
         if 1e-9 < dist < VESSEL_R + BALL_R:
@@ -135,6 +165,7 @@ def physics_step(world: dict) -> str | None:
             goal = "west"
         else:
             b["x"], b["vx"] = FIELD_W - BALL_R, -b["vx"] * WALL_BOUNCE
+    _bevel(b, BALL_R, WALL_BOUNCE)
     for v in world["vessels"].values():
         v["x"], v["y"] = round(v["x"], 3), round(v["y"], 3)
         v["vx"], v["vy"] = round(v["vx"], 3), round(v["vy"], 3)
@@ -160,7 +191,7 @@ def digest_state(prev: str, world: dict) -> str:
 class Prang(Game):
     ID = "prang"
     NAME = "Prang"
-    VERSION = "1.0"
+    VERSION = "1.1"     # 1.1: beveled corners (replays of 1.0 logs differ)
     SKILLS = ["realtime-control", "spatial-planning", "teamplay"]
 
     def __init__(self):
@@ -184,7 +215,9 @@ second and never waits for you.
 {VESSEL_R:g}); one ball (radius {BALL_R:g}); goal mouths on each end
 wall between y={GOAL_Y[0]:g} and y={GOAL_Y[1]:g}. Team west defends the
 x=0 goal and attacks x={FIELD_W:g}; east the reverse. Most goals when
-the clock ends wins.
+the clock ends wins. Corners are beveled 45° at {CORNER_CUT:g} units —
+the ball cannot be pinned flush in a corner; it rolls off the cut back
+into play.
 
 ## Input programs — muscle memory as protocol
 You do not steer frame by frame. You commit a PROGRAM: up to
