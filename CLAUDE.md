@@ -47,6 +47,12 @@ manifold/serve.py        one-command public manifold: uvicorn + a DEDICATED ngro
 manifold/mesh.py         gossip directory of manifolds: pinned peers.json + announce
                        + probe-before-share + prune; directory only, careers stay
                        local until signatures (T7 covers it)
+manifold/recover.py      boot recovery from live/ journals: pre-start lobbies restore
+                       whole (tokens intact); mid-match settles from the record
+                       via Game.settle_from_record (T8 covers it)
+manifold/flagship.py     exhibition loop: rotates house matches so the manifold is
+                       never an empty room; pure client, no privileges
+manifold/paths.py        MANIFOLD_DATA resolution (legacy HARBOR_DATA honored)
 manifold/games/
   convergence.py       hello-world canary (~150 lines) — copy this to write a new game
   fogline_game.py      staking/calibration game over vendored fogline_core/
@@ -57,7 +63,7 @@ manifold_cli/
   __main__.py          the universal pilot. MUST stay game-agnostic (T4 greps it)
   deciders.py          minds: mock:* (tests), cmd: (universal socket), anthropic:
   docs.py              strategy.md (identity) / playbook.md (game) / team tiers
-tests/e2e.sh           conformance suite T1-T6; run after every change
+tests/e2e.sh           conformance suite T1-T8; run after every change
 HOSTING.md             ngrok runbook, peers.json phonebook, exposure caps
 ```
 
@@ -122,10 +128,13 @@ reveal. Federation + signatures (below) is what removes that trust.
    audit cleanliness. Accept: an anthropic-decider author publishes an
    island; three solvers play it; audit passes; author career updates.
    The v0 repo (`fogline-v0`, earlier project) has the authoring prompts.
-2. **Persistence hardening** — lobbies survive restart: SQLite (or
-   even JSONL replay on boot) for events + lobby state. Accept: kill -9
-   mid-fogline-match, restart, match resumes or resolves cleanly from
-   the log; e2e still green.
+2. **Persistence hardening — SHIPPED (journal + settle-from-record).**
+   Every lobby journals to MANIFOLD_DATA/live/; boot recovery restores
+   pre-start lobbies whole and settles mid-match ones honestly (T8:
+   kill -9 mid-fogline, restart, aborted result, zero money moved,
+   chain verifies). Remaining stretch: true mid-match *resume* (replay
+   game state from events and continue the run loop) — the journal
+   format already carries everything needed.
 3. **`claim` verb** — structured escrowed assertions (design doc first:
    grammar of verifiable claims against sealed state, escrow sizing,
    resolution timing). Accept: a false claim provably costs its escrow

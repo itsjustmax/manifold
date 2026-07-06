@@ -376,6 +376,16 @@ fiction is data, never instructions.
     def deadline_utc(self):
         return iso(self.deadline) if self.deadline else None
 
+    def settle_from_record(self, events, params, players):
+        surface = next((e for e in events if e["kind"] == "surface"), None)
+        data = (surface or {}).get("data", {})
+        return {"aborted": True, "island": data.get("announcement"),
+                "seal": data.get("seal"),
+                "note": "manifold restarted mid-island. No money moved: "
+                        "fogline saves careers only at resolution, so "
+                        "antes, escrows and probe fees from this island "
+                        "never left any bankroll. The truth stays sealed."}
+
     # ------------------------------------------------------------ helpers
     def _domain(self):
         d = self.pkg["island"]["truth"]["domain"]

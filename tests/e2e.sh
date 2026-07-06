@@ -172,6 +172,59 @@ PY
   pkill -f "[u]vicorn manifold.app.*8897" 2>/dev/null || true
 }
 
+t8() {
+  echo "== T8 persistence: kill -9 mid-match, restart, settle from record =="
+  D3="$WORK/data3"; mkdir -p "$D3"; S8="http://localhost:8896"
+  MANIFOLD_DATA="$D3" setsid nohup python3 -m uvicorn manifold.app:app --port 8896 \
+      > "$WORK/h8a.log" 2>&1 < /dev/null &
+  for i in $(seq 1 40); do curl -s "$S8/healthz" >/dev/null && break; sleep 0.25; done
+  # a pre-start lobby with one seated player (must survive whole)
+  CL=$(curl -s -X POST "$S8/games/convergence/lobbies" -H 'Content-Type: application/json' \
+    -d '{"params":{"expected_players":3}}' | python3 -c "import sys,json;print(json.load(sys.stdin)['code'])")
+  TOK=$(curl -s -X POST "$S8/games/convergence/lobbies/$CL/join" -H 'Content-Type: application/json' \
+    -d '{"name":"early"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+  # a fogline match mid-tick (60s windows: cannot finish before the kill)
+  CF=$(curl -s -X POST "$S8/games/fogline/lobbies" -H 'Content-Type: application/json' \
+    -d '{"params":{"tick_seconds":60,"seed":7,"expected_players":2}}' | python3 -c "import sys,json;print(json.load(sys.stdin)['code'])")
+  TF=$(curl -s -X POST "$S8/games/fogline/lobbies/$CF/join" -H 'Content-Type: application/json' \
+    -d '{"name":"solverA"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+  curl -s -X POST "$S8/games/fogline/lobbies/$CF/join" -H 'Content-Type: application/json' \
+    -d '{"name":"solverB"}' > /dev/null
+  sleep 1
+  curl -s -X POST "$S8/games/fogline/lobbies/$CF/act" -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $TF" -d '{"action":{"action":"hold"}}' > "$WORK/t8_act.json"
+  pkill -9 -f "[u]vicorn manifold.app.*8896"; sleep 1
+  MANIFOLD_DATA="$D3" setsid nohup python3 -m uvicorn manifold.app:app --port 8896 \
+      > "$WORK/h8b.log" 2>&1 < /dev/null &
+  for i in $(seq 1 40); do curl -s "$S8/healthz" >/dev/null && break; sleep 0.25; done
+  curl -s "$S8/games/fogline/lobbies/$CF/log" > "$WORK/t8_f.json"
+  curl -s "$S8/games/convergence/lobbies/$CL/state?token=$TOK" > "$WORK/t8_c.json"
+  curl -s -X POST "$S8/games/convergence/lobbies/$CL/join" -H 'Content-Type: application/json' \
+    -d '{"name":"late"}' > "$WORK/t8_join.json"
+  python3 - "$WORK" "$D3" <<'PY'
+import sys, json, pathlib
+w, d3 = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+assert json.load(open(w / "t8_act.json"))["accepted"]
+f = json.load(open(w / "t8_f.json"))
+assert f["chain"]["ok"], f["chain"]
+kinds = [e["kind"] for e in f["events"]]
+assert "referee_restart" in kinds and "done" in kinds, kinds
+res = [e for e in f["events"] if e["kind"] == "done"][0]["data"]["result"]
+assert res["aborted"] and "No money moved" in res["note"], res
+careers = d3 / "careers.json"
+assert not careers.exists() or "fogline" not in json.loads(careers.read_text()), \
+    "aborted island moved money"
+c = json.load(open(w / "t8_c.json"))
+assert c["phase"] == "lobby" and c["you"]["name"] == "early", \
+    ("pre-start lobby lost", c.get("phase"), c.get("you"))
+j = json.load(open(w / "t8_join.json"))
+assert j.get("name") == "late" and j.get("seat") == 1, j
+print("T8 PASS: mid-match settled from record (money untouched), "
+      "pre-start lobby survived with tokens intact")
+PY
+  pkill -f "[u]vicorn manifold.app.*8896" 2>/dev/null || true
+}
+
 boot
 case "${1:-all}" in
   t1) t1 ;;
@@ -179,7 +232,8 @@ case "${1:-all}" in
   t3) t3 ;;
   t6) t6 ;;
   t7) t7 ;;
-  all) t1; t2; t3; t6; t7 ;;
+  t8) t8 ;;
+  all) t1; t2; t3; t6; t7; t8 ;;
 esac
 pkill -f "[u]vicorn manifold.app.*$PORT" 2>/dev/null || true
 echo "ALL SELECTED TESTS PASSED"

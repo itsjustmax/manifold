@@ -25,6 +25,7 @@ from .games.fogline_game import Fogline
 from .games.prang import Prang
 from .mesh import Mesh
 from .paths import data_dir
+from .recover import recover_live
 from .web import home_page, play_page, watch_page
 
 DATA = data_dir()
@@ -45,6 +46,11 @@ MAX_SUGGESTIONS = 500
 
 INSTANCE_ID = secrets.token_hex(8)   # per-boot; lets the mesh detect itself
 MESH = Mesh(DATA, INSTANCE_ID)
+
+# Crash recovery runs before the first request: journaled lobbies that
+# never started come back joinable (tokens intact); mid-match journals
+# settle from the record. Deferred to first startup so _on_lobby_done
+# exists; see the bottom of this module.
 
 
 @app.on_event("startup")
@@ -97,6 +103,8 @@ def _update_records(lb: Lobby) -> None:
     Fogline writes its own (bankroll + Brier) inside _resolve; this
     covers prang (W/L/D by team) and convergence (points)."""
     res = lb.result or {}
+    if res.get("aborted"):
+        return              # settled-from-record matches never move careers
     c = careers_load()
     if lb.game.ID == "prang" and "winner" in res:
         g = c.setdefault("prang", {})
@@ -126,6 +134,11 @@ def _update_records(lb: Lobby) -> None:
 def _on_lobby_done(lb: Lobby) -> None:
     _persist_log(lb)
     _update_records(lb)
+    if lb.journal is not None:          # matches/ is now the durable copy
+        try:
+            lb.journal.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _lobby_summary(game_id: str, lb: Lobby) -> dict:
@@ -417,6 +430,11 @@ async def create_lobby(game_id: str, body: dict = None):
     code = new_code({c for (_, c) in LOBBIES})
     lb = Lobby(code, game, params)
     lb.on_done = _on_lobby_done
+    live = DATA / "live"
+    live.mkdir(parents=True, exist_ok=True)
+    lb.journal = live / f"{game_id}-{code}.jsonl"
+    lb.journal_write({"kind": "_lobby", "game": game_id, "code": code,
+                      "params": params, "created_utc": iso(now())})
     LOBBIES[(game_id, code)] = lb
     return {"code": code, "game": game_id, "params": params,
             "join": f"/games/{game_id}/lobbies/{code}/join"}
@@ -493,3 +511,7 @@ def log(game_id: str, code: str):
         _persist_log(lb)
     return {"phase": lb.phase, "chain": verify_chain(entries),
             "events": entries}
+
+
+# ------------------------------------------------------------- recovery
+LOBBIES.update(recover_live(DATA, GAMES, _on_lobby_done))

@@ -122,3 +122,10 @@ class Convergence(Game):
 
     def deadline_utc(self):
         return iso(self.deadline) if self.deadline else None
+
+    def settle_from_record(self, events, params, players):
+        history = [e["data"] for e in events if e["kind"] == "reveal"]
+        return {"aborted": True, "converged": False, "round": None,
+                "score_each": 0, "history": history,
+                "note": "manifold restarted mid-match; completed rounds "
+                        "stand in the record, nobody scores"}

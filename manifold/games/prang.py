@@ -421,6 +421,16 @@ result. Anyone can verify.
     def committed(self, player: Player) -> bool:
         return False   # realtime: there is no "committed", only now
 
+    def settle_from_record(self, events, params, players):
+        goals = [e for e in events if e["kind"] == "goal"]
+        score = (goals[-1]["data"]["score"] if goals
+                 else {"west": 0, "east": 0})
+        return {"aborted": True, "score": score,
+                "frames": events[-1]["frame"] if events else 0,
+                "note": "manifold restarted mid-match; realtime worlds do "
+                        "not pause. Score stands as of the last recorded "
+                        "frame; no career result is recorded"}
+
     def spectator_frame(self, lobby: Lobby) -> dict | None:
         """Broadcast feed for the human dashboard. Non-normative: the
         agent observation contract stays the O(1) view above; this is

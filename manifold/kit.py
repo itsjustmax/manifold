@@ -12,6 +12,7 @@ import hashlib
 import json
 import secrets
 import time
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 FRAME_HZ = 60
@@ -54,6 +55,16 @@ class Event:
         if not self.public:
             d = {**d, "data": "[sealed]"}
         return d
+
+    @staticmethod
+    def from_dict(d: dict) -> "Event":
+        """Rehydrate a journaled event verbatim — hash included, never
+        recomputed, so a restored chain is the original chain."""
+        ev = object.__new__(Event)
+        ev.seq, ev.prev, ev.hash = d["seq"], d["prev"], d["hash"]
+        ev.frame, ev.kind, ev.actor = d["frame"], d["kind"], d["actor"]
+        ev.public, ev.data, ev.ts = d["public"], d["data"], d["ts"]
+        return ev
 
 
 def verify_chain(events: list[dict]) -> dict:
@@ -139,6 +150,17 @@ class Lobby:
         self.comms = Comms(game.comms_channels(), game.comms_window_frames())
         self.task: Optional[asyncio.Task] = None
         self.on_done: Optional[Callable[["Lobby"], None]] = None
+        self.journal: Optional[Path] = None   # durable event log (crash recovery)
+
+    def journal_write(self, obj: dict) -> None:
+        if self.journal is None:
+            return
+        try:
+            with self.journal.open("a") as f:
+                f.write(canonical(obj) + "\n")
+                f.flush()
+        except OSError:
+            pass    # a full disk must not kill a live match
 
     # ------------------------------------------------------------ timing
     def frame(self) -> int:
@@ -155,6 +177,7 @@ class Lobby:
         ev = Event(self.seq + 1, prev, self.frame(), kind, actor, public, data)
         self.events.append(ev)
         self.seq = ev.seq
+        self.journal_write(ev.full())
         self._wake()
         return ev
 
@@ -198,6 +221,8 @@ class Lobby:
         p = Player(name, seat, team, secrets.token_urlsafe(24))
         self.players[p.token] = p
         self.by_name[name] = p
+        self.journal_write({"kind": "_session", "name": name, "seat": seat,
+                            "team": team, "token": p.token})
         self.emit("join", True, name, {"seat": seat, "team": team})
         expected = int(self.params.get("expected_players",
                                        self.game.players_min()))
@@ -313,6 +338,15 @@ class Game:
     def view(self, player: Optional[Player], lobby: Lobby) -> dict: return {}
     def committed(self, player: Player) -> bool: return False
     def deadline_utc(self) -> Optional[str]: return None
+
+    def settle_from_record(self, events: list[dict], params: dict,
+                           players: list[Player]) -> dict:
+        """Called at boot for a match found mid-flight in a journal:
+        produce an honest final result from the recorded events alone.
+        Games override; the default admits it recovered nothing."""
+        return {"aborted": True,
+                "note": "manifold restarted mid-match; this game defines "
+                        "no record-settlement, so nothing was recovered"}
 
 
 def new_code(existing: set[str]) -> str:
