@@ -108,6 +108,27 @@ class Mesh:
         except Exception:
             return None
 
+    def _post_json(self, url: str, body: dict) -> dict | None:
+        req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                     method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", "manifold-mesh/0.1")
+        req.add_header("ngrok-skip-browser-warning", "1")
+        try:
+            with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as r:
+                return json.loads(r.read().decode())
+        except Exception:
+            return None
+
+    def _self_url(self) -> str | None:
+        """Our current public address, as written by harbor.serve.
+        Ephemeral by design — tunnels rotate; the mesh tracks it."""
+        p = self.data / "public_url.txt"
+        try:
+            return origin_of(p.read_text().strip()) if p.exists() else None
+        except OSError:
+            return None
+
     def _probe(self, origin: str) -> dict | None:
         """A live harbor answers /healthz with ok + games + instance."""
         d = self._get_json(f"{origin}/healthz")
@@ -160,6 +181,7 @@ class Mesh:
         neighbors = list(pinned_set) + list(self.known.keys())
         # re-probe everyone we list; collect hearsay from their lists
         hearsay: list[str] = []
+        alive: list[str] = []
         for origin in dict.fromkeys(neighbors):
             health = await asyncio.to_thread(self._probe, origin)
             if health is None:
@@ -172,6 +194,7 @@ class Mesh:
                              "pinned" if origin in pinned_set
                              else self.known.get(origin, {}).get(
                                  "source", "gossip"))
+            alive.append(origin)
             theirs = await asyncio.to_thread(
                 self._get_json, f"{origin}/peers")
             for e in (theirs or {}).get("peers", []):
@@ -187,6 +210,19 @@ class Mesh:
             health = await asyncio.to_thread(self._probe, o)
             if health and health.get("instance") != self.instance_id:
                 self._note_alive(o, health, source="gossip")
+        # re-announce our CURRENT address to every live neighbor —
+        # ephemeral tunnel URLs are fine because this heals the churn:
+        # peers learn our new address from us; our old one prunes out.
+        # Guard: only announce a URL that verifiably answers as us, so
+        # a stale public_url.txt can't poison anyone's directory.
+        self_url = self._self_url()
+        if self_url and alive:
+            me = await asyncio.to_thread(self._probe, self_url)
+            if me and me.get("instance") == self.instance_id:
+                for origin in alive:
+                    await asyncio.to_thread(
+                        self._post_json, f"{origin}/peers/announce",
+                        {"url": self_url})
         self._save()
 
     async def loop(self) -> None:

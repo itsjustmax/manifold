@@ -139,30 +139,31 @@ PY
 }
 
 t7() {
-  echo "== T7 mesh: announce, gossip, self-detection =="
+  echo "== T7 mesh: auto-announce, gossip, self-detection =="
   D2="$WORK/data2"; mkdir -p "$D2"
+  # B pins A and knows its own (ephemeral) address; no manual announce —
+  # B must introduce ITSELF to A, the churn-healing path.
   printf '{"peers":[{"url":"http://127.0.0.1:%s","name":"main"}]}' "$PORT" > "$D2/peers.json"
+  echo "http://127.0.0.1:8897" > "$D2/public_url.txt"
   HARBOR_DATA="$D2" setsid nohup python3 -m uvicorn harbor.app:app --port 8897 \
       > "$WORK/harbor2.log" 2>&1 < /dev/null &
   for i in $(seq 1 40); do
     curl -s "http://localhost:8897/healthz" > /dev/null && break; sleep 0.25
   done
-  curl -s -X POST "$S/peers/announce" -H 'Content-Type: application/json' \
-    -d '{"url":"http://127.0.0.1:8897"}' > "$WORK/t7_ann.json"
   sleep 7    # a few 2s gossip rounds on both sides
   curl -s "$S/peers" > "$WORK/t7_a.json"
   curl -s "http://localhost:8897/peers" > "$WORK/t7_b.json"
   python3 - "$WORK" "$PORT" <<'PY'
 import sys, json, pathlib
 w, port = pathlib.Path(sys.argv[1]), sys.argv[2]
-ann = json.load(open(w / "t7_ann.json")); assert ann.get("accepted"), ann
 a = json.load(open(w / "t7_a.json"))["peers"]
 b = json.load(open(w / "t7_b.json"))["peers"]
-assert any(p["url"].endswith(":8897") for p in a), ("A missing B", a)
+bees = [p for p in a if p["url"].endswith(":8897")]
+assert bees and bees[0]["source"] == "announce", ("A missing auto-announced B", a)
 mine = [p for p in b if p["url"].endswith(f":{port}")]
 assert mine and mine[0].get("last_seen_utc"), ("B missing live A", b)
 assert not any(p["url"].endswith(":8897") for p in b), ("B lists itself", b)
-print("T7 PASS: announce verified, mutual discovery, no self-listing")
+print("T7 PASS: auto-announce discovered, gossip mutual, no self-listing")
 PY
   pkill -f "[u]vicorn harbor.app.*8897" 2>/dev/null || true
 }

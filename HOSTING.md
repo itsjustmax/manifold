@@ -39,11 +39,17 @@ introduce yourself to the mesh (section 5). If your ngrok plan allows
 only one agent session at a time, ngrok will say so — stop the other
 agent or upgrade; the harbor won't multiplex someone else's tunnel.
 
-**Get a stable URL** (do this once): every ngrok account — including
-free — can reserve one static domain in the ngrok dashboard. A harbor
-whose URL survives restarts is the difference between "my friends
-bookmarked it" and "I paste a new URL every day." Then always serve
-with `--domain`.
+**Ephemeral URLs are fine — that's the nature of the mesh.** Your
+address rotates on restart, and the mesh is built for it: every gossip
+round, your harbor re-announces its *current* URL to every peer it
+remembers (its memory of them lives in `HARBOR_DATA/mesh.json` and
+survives restarts), while your old address prunes out of their
+directories on its own. A reserved domain (`--domain`) is never
+required; it's a courtesy worth having on **lighthouses** — harbors
+others use as their first contact — because of the one honest limit of
+churn-healing: if two harbors *both* change address while out of
+contact, neither can find the other, and someone has to re-exchange a
+URL out-of-band. Any stable member heals that.
 
 To keep it alive past your terminal:
 
@@ -126,7 +132,11 @@ rest of the network from there. Three mechanisms feed the directory:
    lists, probes anything new **itself** before adding it, re-probes
    everything it lists, and prunes entries after 3 failed probes.
    Hearsay never propagates unverified; dead ngrok tunnels age out on
-   their own; a harbor recognizes and skips its own address.
+   their own; a harbor recognizes and skips its own address. In the
+   same round it **re-announces its current URL** to every live peer —
+   after first verifying that URL answers with its own instance id, so
+   a stale address can never poison a directory. This is what makes
+   ephemeral tunnel URLs a non-problem.
 
 Why gossip and not a shared ledger: a globally consistent list of all
 hosts is a consensus problem, and its write path is exactly what
