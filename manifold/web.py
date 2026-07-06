@@ -60,21 +60,41 @@ function drawP2(cv, D){
   const bp = P(bx,by,bz), br = 5 + 4*(1 - by/A[1]);
   cx.fillStyle = '#fff';
   cx.beginPath(); cx.arc(bp[0],bp[1],br,0,7); cx.fill();
-  // paddles: disc + face-normal spike (your aim, visible)
+  // paddles: the ACTUAL rotated rectangular face, projected — the
+  // orientation is the shot, so the quad is the story — plus a long
+  // aim spike along the face normal
+  const [HW, HH] = D.pad || [1600, 1000];
   for (const p of D.paddles) {
-    const pp = P(p.x,p.y,p.z);
+    const ya = p.yaw*Math.PI/180, pi = p.pitch*Math.PI/180;
+    const cyw = Math.cos(ya), syw = Math.sin(ya);
+    const cpt = Math.cos(pi), spt = Math.sin(pi);
+    const n  = [cpt*cyw, cpt*syw, spt];
+    const t1 = [-syw, cyw, 0];
+    const t2 = [-spt*cyw, -spt*syw, cpt];
+    const corner = (su, sv) => P(
+      p.x + su*HW*t1[0] + sv*HH*t2[0],
+      p.y + su*HW*t1[1] + sv*HH*t2[1],
+      p.z + su*HW*t1[2] + sv*HH*t2[2]);
+    const q = [corner(-1,-1), corner(1,-1), corner(1,1), corner(-1,1)];
     const psh = P(p.x,p.y,0);
     cx.fillStyle = 'rgba(0,0,0,0.30)';
-    cx.beginPath(); cx.ellipse(psh[0],psh[1],12,4,0,0,7); cx.fill();
-    cx.fillStyle = p.team === 'west' ? '#4da3ff' : '#ff9d4d';
-    cx.beginPath(); cx.ellipse(pp[0],pp[1],15,10,0,0,7); cx.fill();
-    const ya = p.yaw*Math.PI/180, pi = p.pitch*Math.PI/180;
-    const n = [Math.cos(pi)*Math.cos(ya), Math.cos(pi)*Math.sin(ya),
-               Math.sin(pi)];
-    const tip = P(p.x + n[0]*130, p.y + n[1]*130, p.z + n[2]*130);
+    cx.beginPath(); cx.ellipse(psh[0],psh[1],14,5,0,0,7); cx.fill();
+    cx.fillStyle = p.team === 'west' ? 'rgba(77,163,255,0.40)'
+                                     : 'rgba(255,157,77,0.40)';
+    cx.strokeStyle = p.team === 'west' ? '#4da3ff' : '#ff9d4d';
+    cx.lineWidth = 2;
+    cx.beginPath(); cx.moveTo(...q[0]);
+    q.slice(1).forEach(c => cx.lineTo(...c));
+    cx.closePath(); cx.fill(); cx.stroke();
+    cx.lineWidth = 1;
+    const pp = P(p.x,p.y,p.z);
+    const L = HW*2.2;
+    const tip = P(p.x + n[0]*L, p.y + n[1]*L, p.z + n[2]*L);
     line(pp, tip, '#dbe4ff');
-    cx.fillStyle = '#dbe4ff'; cx.font = '11px monospace';
-    cx.fillText(p.name, pp[0]+14, pp[1]-10);
+    cx.fillStyle = '#dbe4ff';
+    cx.beginPath(); cx.arc(tip[0], tip[1], 2.5, 0, 7); cx.fill();
+    cx.font = '11px monospace';
+    cx.fillText(p.name, q[2][0]+6, q[2][1]-6);
   }
 }
 """
@@ -642,7 +662,7 @@ function render() {{
     $('clock').textContent = 't+' + (fr.f / 60).toFixed(1) + 's';
     if (R.frames.kind === 'prang2') {{
       drawP2($('field'), {{arena: R.frames.arena, gy: R.frames.goal_y,
-        gz: R.frames.goal_z, ball: fr.b,
+        gz: R.frames.goal_z, pad: R.frames.pad, ball: fr.b,
         paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
           team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
           yaw: p[3], pitch: p[4]}}))}});
@@ -910,7 +930,8 @@ async function broadcast() {{
       const f = w.frame;
       if (f.kind === 'prang2') {{
         drawP2($('field'), {{arena: f.arena, gy: f.goal_y, gz: f.goal_z,
-          ball: [f.ball.x, f.ball.y, f.ball.z], paddles: f.paddles}});
+          pad: f.pad, ball: [f.ball.x, f.ball.y, f.ball.z],
+          paddles: f.paddles}});
         $('score').innerHTML = `<span class="w">west ${{f.score.west}}</span>
           <span class="dim">—</span> <span class="e">${{f.score.east}} east</span>
           <span class="sub" style="font-size:13px">· ${{Math.ceil(f.frames_left/60)}}s left</span>`;

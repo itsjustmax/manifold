@@ -40,7 +40,7 @@ def exhibit_for(game: str, minds: str | None) -> dict:
         return {"params": {"tick_seconds": ts, "expected_players": 3},
                 "timeout": ts * 6 + 120}
     if game == "prang2":
-        return {"params": {"match_seconds": 120, "expected_players": 2},
+        return {"params": {"match_seconds": 120, "expected_players": 6},
                 "timeout": 120 + 90}
     return {"params": {"match_seconds": 120, "expected_players": 4},
             "timeout": 120 + 90}
@@ -103,7 +103,7 @@ def seats_for(game: str, minds: str | None) -> list[tuple[str, float | None]]:
                 [("mock:fogline-brash", None), ("mock:fogline-measured", None),
                  ("mock:hold", None)])
     if game == "prang2":
-        return [("mock:paddle", 3)] * 2
+        return [("mock:paddle", 3)] * 6      # 3v3, one agent per paddle
     if minds and minds.startswith("anthropic:"):
         return [(minds, 0.5), ("mock:prang-striker", 3),
                 (minds, 0.5), ("mock:prang-striker", 3)]

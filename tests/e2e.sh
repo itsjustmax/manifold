@@ -242,10 +242,10 @@ PY
 }
 
 t9() {
-  echo "== T9 prang2: 5-axis paddles, variable force, replay symmetry =="
-  C=$(lobby prang2 '{"match_seconds":10,"expected_players":2}')
-  for n in pax quill; do python3 -m manifold_cli join "$S" prang2 --code "$C" --name "$n" >/dev/null; done
-  for n in pax quill; do pilot "$n" mock:paddle 3; done
+  echo "== T9 prang2: 3v3 rect paddles, variable force, replay symmetry =="
+  C=$(lobby prang2 '{"match_seconds":10,"expected_players":6}')
+  for n in pax quill rook sable tarn umber; do python3 -m manifold_cli join "$S" prang2 --code "$C" --name "$n" >/dev/null; done
+  for n in pax quill rook sable tarn umber; do pilot "$n" mock:paddle 3; done
   sleep 13
   curl -s "$S/games/prang2/lobbies/$C/log" > /dev/null   # touch to persist
   LOG="$MANIFOLD_DATA/matches/prang2-$C/log.jsonl"
@@ -256,7 +256,7 @@ t9() {
 import sys, json
 evs = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 progs = [e for e in evs if e["kind"] == "program"]
-assert len(progs) > 20, f"paddles barely acted: {len(progs)}"
+assert len(progs) > 60, f"paddles barely acted: {len(progs)}"
 print(f"T9 PASS: {len(progs)} programs, replay digest matches, chain ok")
 PY
 }

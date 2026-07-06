@@ -283,25 +283,25 @@ class MockPaddle:
         if not you or not ball:
             return {"action": "none"}
         arc = ball.get("arc") or {}
-        far = abs(ball["x"] - you["x"]) > 400
+        far = abs(ball["x"] - you["x"]) > 8000
         t = (arc.get("f30") if far and arc.get("f30")
              else [ball["x"], ball["y"], ball["z"]])
         g = v.get("goal_you_attack") or {}
         gx = float(g.get("x", 0.0))
-        gy = sum(g.get("y_range", [600, 600])) / 2
-        gz = sum(g.get("z_range", [400, 400])) / 2
-        station = 300.0 if gx > 1000 else 1700.0
+        gy = sum(g.get("y_range", [12000, 12000])) / 2
+        gz = sum(g.get("z_range", [8000, 8000])) / 2
+        station = 6000.0 if gx > 20000 else 34000.0
         # swing THROUGH the ball when it's close — paddle velocity
         # transfers into the shot; camping the station hits nothing
-        tx = ball["x"] if abs(ball["x"] - you["x"]) < 320 else station
-        vx = max(-420.0, min(420.0, (tx - you["x"]) * 4))
-        vy = max(-420.0, min(420.0, (t[1] - you["y"]) * 4))
-        vz = max(-420.0, min(420.0, (t[2] - you["z"]) * 4))
+        tx = ball["x"] if abs(ball["x"] - you["x"]) < 6400 else station
+        vx = max(-12000.0, min(12000.0, (tx - you["x"]) * 4))
+        vy = max(-12000.0, min(12000.0, (t[1] - you["y"]) * 4))
+        vz = max(-12000.0, min(12000.0, (t[2] - you["z"]) * 4))
         dx = gx - you["x"]
         yaw = math.degrees(math.atan2(gy - you["y"], dx))
         pitch = max(-89.0, min(89.0, math.degrees(
             math.atan2(gz - you["z"], abs(dx)))))
-        near = abs(ball["x"] - you["x"]) < 350
+        near = abs(ball["x"] - you["x"]) < 7000
         return {"action": "program",
                 "segments": [{"ms": 250, "vx": round(vx, 1),
                               "vy": round(vy, 1), "vz": round(vz, 1),
