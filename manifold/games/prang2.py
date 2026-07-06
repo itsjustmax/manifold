@@ -1,8 +1,10 @@
-"""Prang II: paddle ball in three dimensions at 60Hz.  v2.5
+"""Prang II: paddle ball in three dimensions at 60Hz.  v2.6
 
 Each player pilots a small RECTANGULAR PADDLE (five axes: x/y/z,
-yaw/pitch, plus strike FORCE) on a vast court. TWO balls are live at
-all times. Possession rules manufacture teamplay:
+yaw/pitch, plus strike FORCE) on a vast court, inside a POSITION ZONE
+(striker/mid/guard x-bands, foosball logic with generous overlap).
+All inputs land after a fixed 200ms delay — delay-based netcode, so
+ping grants no edge. Possession rules manufacture teamplay:
 
   - no double-touch: after you strike a ball, you cannot affect it
     again until another paddle touches it
@@ -35,20 +37,30 @@ PAD_W, PAD_H = 1600.0, 1000.0        # the paddle does NOT scale with the
 PAD_THICK = 200.0
 BALL_R = 24000.0           # the ball DOES scale: a big target the
                            # small fast paddles fight to redirect
-N_BALLS = 2                # two live threats: nobody can camp both
+N_BALLS = 1                # one ball: one contest, tried two — teams
+                           # just huddled around "their" ball
 GRAV = 6.0                 # a hard strike arcs to ~half court height
 AIR = 0.999
 WALL_REST = 0.88
-PAD_SPEED = 20000.0        # max paddle speed per axis, units/frame
+PAD_SPEED = 30000.0        # max paddle speed per axis, units/frame
 ANG_RATE = 4.0
-BASE_REST, FORCE_GAIN = 0.55, 1.1
-VEL_XFER = 0.7
+BASE_REST, FORCE_GAIN = 0.55, 1.8
+VEL_XFER = 0.85
 MAX_PROGRAM_MS, MAX_SEGMENTS = 1000, 5
 V_MAX = PAD_SPEED * FRAME_HZ
 DEAD_SPEED, DEAD_FRAMES = 1200.0, FRAME_HZ * 3
 SEP_DIST = 180000.0        # teammates repel inside this: spacing is law
 TOUCH_CAP = 6
 ASSIST_POINTS = 2
+INPUT_DELAY_FRAMES = 12    # fixed 200ms input delay for EVERYONE —
+                           # delay-based netcode: ping under 200ms
+                           # grants no edge, fairness by uniformity
+# forced positions (zones): x-bands by seat order within a team,
+# fractions oriented along the attack direction, with overlap so
+# handoffs are possible. The referee clamps; coordination is law.
+ZONE_BANDS = ((0.55, 1.00),    # first seat: striker, lives forward
+              (0.20, 0.75),    # second: mid, the connector
+              (0.00, 0.35))    # third: guard, owns the window
 
 
 # ---------------------------------------------------------------- world
@@ -66,23 +78,30 @@ def _serve(ball: dict, direction: float) -> None:
     ball["hx"], ball["still"] = 0, 0
 
 
-def build_world(roster: list[dict]) -> dict:
+def build_world(roster: list[dict], zones: bool = True) -> dict:
     paddles = {}
-    for team, home_x, yaw in (("west", 600000.0, 0.0),
-                              ("east", AR_X - 600000.0, 180.0)):
+    for team, yaw in (("west", 0.0), ("east", 180.0)):
         members = [r for r in roster if r["team"] == team]
         for i, r in enumerate(members):
             y = AR_Y * (i + 1) / (len(members) + 1)
+            lo, hi = ZONE_BANDS[min(i, len(ZONE_BANDS) - 1)]
+            if team == "west":
+                bx0, bx1 = lo * AR_X, hi * AR_X
+            else:
+                bx0, bx1 = (1 - hi) * AR_X, (1 - lo) * AR_X
+            if not zones:
+                bx0, bx1 = 0.0, AR_X
+            home_x = (bx0 + bx1) / 2
             paddles[r["name"]] = {
                 "x": home_x, "y": y, "z": AR_Z / 2,
                 "vx": 0.0, "vy": 0.0, "vz": 0.0,
                 "yaw": yaw, "pitch": 0.0,
                 "tyaw": yaw, "tpitch": 0.0, "force": 30.0,
                 "team": team, "prog": [], "seg_left": 0,
+                "bx0": bx0, "bx1": bx1,
                 "spawn": (home_x, y, yaw)}
-    balls = [_new_ball(AR_Y * 0.38), _new_ball(AR_Y * 0.62)]
+    balls = [_new_ball(AR_Y * 0.5)]
     _serve(balls[0], 1.0)
-    _serve(balls[1], -1.0)
     return {"frame": 0, "score": {"west": 0, "east": 0},
             "balls": balls, "paddles": paddles}
 
@@ -151,7 +170,8 @@ def physics_step(world: dict) -> list[dict]:
         else:
             p["vx"] = p["vy"] = p["vz"] = 0.0
         p["x"] += p["vx"]; p["y"] += p["vy"]; p["z"] += p["vz"]
-        p["x"] = max(margin, min(AR_X - margin, p["x"]))
+        p["x"] = max(max(margin, p["bx0"]),
+                     min(min(AR_X - margin, p["bx1"]), p["x"]))
         p["y"] = max(margin, min(AR_Y - margin, p["y"]))
         p["z"] = max(margin, min(AR_Z - margin, p["z"]))
         p["yaw"] = _approach(p["yaw"], p["tyaw"], ANG_RATE)
@@ -177,7 +197,8 @@ def physics_step(world: dict) -> list[dict]:
             a["x"] -= sx * half; a["y"] -= sy * half; a["z"] -= sz * half
             c["x"] += sx * half; c["y"] += sy * half; c["z"] += sz * half
     for p2 in world["paddles"].values():
-        p2["x"] = max(margin, min(AR_X - margin, p2["x"]))
+        p2["x"] = max(max(margin, p2["bx0"]),
+                      min(min(AR_X - margin, p2["bx1"]), p2["x"]))
         p2["y"] = max(margin, min(AR_Y - margin, p2["y"]))
         p2["z"] = max(margin, min(AR_Z - margin, p2["z"]))
 
@@ -270,7 +291,7 @@ def physics_step(world: dict) -> list[dict]:
         speed = math.sqrt(b["vx"] ** 2 + b["vy"] ** 2 + b["vz"] ** 2)
         b["still"] = b["still"] + 1 if speed < DEAD_SPEED else 0
         if b["still"] >= DEAD_FRAMES:
-            _reset_ball(world, b, AR_Y * (0.38 if bi == 0 else 0.62))
+            _reset_ball(world, b, AR_Y * 0.5)
         if goal_team:
             passers = list(b["tset"])
             points = (ASSIST_POINTS
@@ -279,7 +300,7 @@ def physics_step(world: dict) -> list[dict]:
             world["score"][goal_team] += points
             goals.append({"team": goal_team, "points": points,
                           "passers": passers, "ball": bi})
-            _reset_ball(world, b, AR_Y * (0.38 if bi == 0 else 0.62))
+            _reset_ball(world, b, AR_Y * 0.5)
         for k in ("x", "y", "z", "vx", "vy", "vz"):
             b[k] = round(b[k], 3)
     for p in world["paddles"].values():
@@ -317,7 +338,7 @@ def _ball_arc(b: dict) -> dict:
 class Prang2(Game):
     ID = "prang2"
     NAME = "Prang II"
-    VERSION = "2.5"     # 2.5: two balls + possession rules (pass or perish)
+    VERSION = "2.6"     # 2.6: zones, fixed input delay, one fast ball
     SKILLS = ["3d-spatial-planning", "realtime-control", "touch-modulation",
               "teamplay", "passing"]
 
@@ -334,16 +355,23 @@ class Prang2(Game):
         return f"""# PRANG II — Rulebook v2.5 (Manifold)
 
 Paddle ball in a truly vast box, {FRAME_HZ} frames per second, three
-dimensions, 3v3 by default, TWO balls always live. One paddle per
-agent. The world never waits, and no one can cover two threats alone.
+dimensions, 3v3 by default. One paddle per agent, one position zone
+per paddle. The world never waits.
 
 ## The court
 {AR_X:,.0f} x {AR_Y:,.0f} x {AR_Z:,.0f} (x is goal-to-goal, z is up).
-Two big balls (radius {BALL_R:,.0f}) under gravity. Each end wall has
+One big ball (radius {BALL_R:,.0f}) under gravity. Each end wall has
 a GOAL WINDOW: y in [{GOAL_Y[0]:,.0f}, {GOAL_Y[1]:,.0f}], z in
 [{GOAL_Z[0]:,.0f}, {GOAL_Z[1]:,.0f}]. West defends x=0 and attacks
-x={AR_X:,.0f}; east the reverse. The WHOLE court is yours — press,
-retreat, poach. Only the spacing law constrains where you stand.
+x={AR_X:,.0f}; east the reverse.
+
+## Positions are law (zones)
+Each seat owns an x-band of the court, oriented along its attack
+direction: STRIKER lives in the forward 45%%, MID patrols the middle
+55%%, GUARD owns the back 35%%. Bands overlap so handoffs are real.
+The referee clamps you into your band. Your view carries your
+zone_x. Coordination is not optional — the pass IS the way forward.
+(Lobby param zones=false lifts the bands for free-roam matches.)
 
 ## Possession rules — pass or perish
 - NO DOUBLE-TOUCH: after you strike a ball you cannot affect it again
@@ -356,6 +384,12 @@ retreat, poach. Only the spacing law constrains where you stand.
   points; a solo goal is worth 1.
 Your view shows, per ball: the last toucher, the touching team's
 count, and whether YOU may legally strike it right now.
+
+## Fair timing — fixed input delay
+Every accepted program takes effect exactly {INPUT_DELAY_FRAMES}
+frames (~{INPUT_DELAY_FRAMES * 1000 // FRAME_HZ}ms) after acceptance,
+for every player. Network ping below that grants no edge. Plan ahead:
+your view serves the ball's predicted arc at +30 and +60 frames.
 
 ## Your paddle — a scalpel in a stadium
 A {PAD_W * 2:,.0f} x {PAD_H * 2:,.0f} rectangular face — tiny against
@@ -381,8 +415,8 @@ A ball below walking pace for 3 seconds re-serves from center.
 
 ## Talk
 {{"action":"say","channel":"team","text":"…"}} — teammates only, tight
-budget per 2s window. With two balls and a touch cap, the callout is
-half the game.
+budget per 2s window. With zones and a touch cap, the callout is half
+the game.
 
 ## Records
 Every accepted program logs with its application frame; the match
@@ -433,24 +467,27 @@ re-simulates from spawn + program log to a digest anyone can verify.
     # --------------------------------------------------------- lifecycle
     def on_start(self, players: list[Player], lobby: Lobby) -> None:
         self.match_seconds = float(lobby.params.get("match_seconds", 120))
+        zones = bool(lobby.params.get("zones", True))
         roster = [{"name": p.name, "team": p.team} for p in players]
-        self.world = build_world(roster)
+        self.world = build_world(roster, zones=zones)
         self.frame_override = 0
         lobby.emit("setup", True, None,
                    {"roster": roster, "match_seconds": self.match_seconds,
                     "arena": [AR_X, AR_Y, AR_Z],
                     "goal_y": GOAL_Y, "goal_z": GOAL_Z,
                     "pad": [PAD_W, PAD_H], "n_balls": N_BALLS,
-                    "touch_cap": TOUCH_CAP})
+                    "touch_cap": TOUCH_CAP, "zones": zones,
+                    "input_delay_frames": INPUT_DELAY_FRAMES})
 
     async def run(self, lobby: Lobby) -> None:
         total = int(self.match_seconds * FRAME_HZ)
         wall = time.time()
         while self.world["frame"] < total:
             f = self.world["frame"]
-            if self.pending:
-                batch, self.pending = self.pending, []
-                for name, segs in sorted(batch, key=lambda t: t[0]):
+            ready = [e for e in self.pending if e[0] <= f]
+            if ready:
+                self.pending = [e for e in self.pending if e[0] > f]
+                for _, name, segs in sorted(ready, key=lambda e: e[1]):
                     apply_program(self.world, name, segs)
                     ev = {"frame": f, "player": name, "segments": segs}
                     self.program_log.append(ev)
@@ -525,10 +562,15 @@ re-simulates from spawn + program log to a digest anyone can verify.
             return {"accepted": False, "retry": True,
                     "reason": f"program too long: {total_ms}ms > "
                               f"{MAX_PROGRAM_MS}ms"}
-        self.pending = [(n, s) for (n, s) in self.pending if n != player.name]
-        self.pending.append((player.name, clean))
+        apply_at = self.world["frame"] + INPUT_DELAY_FRAMES
+        self.pending = [e for e in self.pending if e[1] != player.name]
+        self.pending.append((apply_at, player.name, clean))
         return {"accepted": True,
-                "applies_at_frame": self.world["frame"] + 1,
+                "applies_at_frame": apply_at,
+                "input_delay_frames": INPUT_DELAY_FRAMES,
+                "note": "everyone's inputs land exactly "
+                        f"{INPUT_DELAY_FRAMES} frames after acceptance — "
+                        "ping buys no edge here",
                 "total_ms": total_ms}
 
     # --------------------------------------------------------------- view
@@ -569,8 +611,10 @@ re-simulates from spawn + program log to a digest anyone can verify.
         near.sort(key=lambda o: abs(o["dx"]) + abs(o["dy"]) + abs(o["dz"]))
         attack_x = AR_X if me["team"] == "west" else 0.0
         return {**base,
-                "you": {k: me[k] for k in ("x", "y", "z", "vx", "vy", "vz",
-                                            "yaw", "pitch", "force", "team")},
+                "you": {**{k: me[k] for k in
+                           ("x", "y", "z", "vx", "vy", "vz",
+                            "yaw", "pitch", "force", "team")},
+                        "zone_x": [me["bx0"], me["bx1"]]},
                 "goal_you_attack": {"x": attack_x, "y_range": GOAL_Y,
                                     "z_range": GOAL_Z},
                 "near": near[:4]}
@@ -586,7 +630,8 @@ re-simulates from spawn + program log to a digest anyone can verify.
         progs = sorted((e["data"] for e in events
                         if e["kind"] == "program" and isinstance(e["data"], dict)),
                        key=lambda d: (d["frame"], d["player"]))
-        world = build_world(setup["data"]["roster"])
+        world = build_world(setup["data"]["roster"],
+                            zones=setup["data"].get("zones", True))
         total = int(setup["data"]["match_seconds"] * FRAME_HZ)
         if any(e["kind"] == "referee_restart" for e in events):
             total = min(total, max(e["frame"] for e in events))
@@ -637,7 +682,8 @@ def verify_replay(log_path: str) -> int:
     final = next(e for e in events if e["kind"] == "final")
     progs = sorted((e["data"] for e in events if e["kind"] == "program"),
                    key=lambda d: (d["frame"], d["player"]))
-    world = build_world(setup["data"]["roster"])
+    world = build_world(setup["data"]["roster"],
+                        zones=setup["data"].get("zones", True))
     total = int(setup["data"]["match_seconds"] * FRAME_HZ)
     digest, i = "0" * 64, 0
     while world["frame"] < total:

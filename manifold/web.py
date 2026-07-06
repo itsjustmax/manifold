@@ -165,6 +165,45 @@ function drawP2(cv, D){
   cx.strokeStyle='#dbe4ff';
   cx.beginPath(); cx.arc(mc[0],mc[1],4,0,7); cx.stroke();
 }
+// --- 30fps interpolation layer: snapshots arrive ~10Hz, we tween ---
+function p2norm(f){
+  return {arena:f.arena, gy:f.goal_y, gz:f.goal_z, pad:f.pad,
+          ball_r:f.ball_r,
+          balls:f.balls||(f.ball?[[f.ball.x,f.ball.y,f.ball.z]]:[]),
+          paddles:f.paddles};
+}
+function p2lerp(A, B, t){
+  const L=(x,y)=>x+(y-x)*t;
+  const la=(x,y)=>{let d=((y-x+540)%360)-180; return x+d*t;};
+  return {...B,
+    balls:B.balls.map((bb,i)=>A.balls[i]
+      ?[L(A.balls[i][0],bb[0]),L(A.balls[i][1],bb[1]),L(A.balls[i][2],bb[2])]
+      :bb),
+    paddles:B.paddles.map(pb=>{
+      const pa=A.paddles.find(q=>q.name===pb.name);
+      return pa?{...pb, x:L(pa.x,pb.x), y:L(pa.y,pb.y), z:L(pa.z,pb.z),
+                 yaw:la(pa.yaw,pb.yaw), pitch:L(pa.pitch,pb.pitch)}:pb;
+    })};
+}
+let _p2A=null,_p2B=null,_p2t=0,_p2dt=100,_p2on=false,_p2cv=null,_p2stop=()=>false,_p2last=0;
+function p2feed(cv, frame, stopFn){
+  _p2cv=cv; if(stopFn)_p2stop=stopFn;
+  _p2A=_p2B; _p2B=frame;
+  const now=performance.now();
+  _p2dt=_p2A?Math.max(40,Math.min(400,now-_p2t)):100;
+  _p2t=now;
+  if(!_p2on){_p2on=true; requestAnimationFrame(_p2loop);}
+}
+function _p2loop(ts){
+  if(ts-_p2last>=33){
+    _p2last=ts;
+    if(_p2B){
+      const t=_p2A?Math.min(1.3,(performance.now()-_p2t)/_p2dt):1;
+      drawP2(_p2cv, _p2A?p2lerp(p2norm(_p2A),p2norm(_p2B),t):p2norm(_p2B));
+    }
+  }
+  if(!_p2stop()){requestAnimationFrame(_p2loop);}else{_p2on=false;}
+}
 """
 
 _FOG_JS = r"""
@@ -714,30 +753,50 @@ function toggle() {{
   $('pp').textContent = playing ? '⏸ pause' : '▶ play';
   if (playing) step();
 }}
+let posF = 0, lastTs = null;
 function step() {{
   if (!playing) return;
+  if (mode === 'prang') {{ lastTs = null;
+    requestAnimationFrame(prangRaf); return; }}
   if (idx >= ticks.length - 1) {{ playing = false;
     $('pp').textContent = '▶ play'; return; }}
   idx += 1; render();
-  const dt = mode === 'prang' ? 1000 / (R.frames.fps * spd)
-           : mode === 'conv' ? 1600 / spd
+  const dt = mode === 'conv' ? 1600 / spd
            : mode === 'fog' ? 2200 / spd : 500 / spd;
   timer = setTimeout(step, dt);
 }}
-function seek(i) {{ idx = i; render(); }}
-function render() {{
+function prangRaf(ts) {{
+  if (!playing || mode !== 'prang') return;
+  if (lastTs === null) lastTs = ts;
+  posF = Math.min(ticks.length - 1,
+                  posF + (ts - lastTs) / 1000 * R.frames.fps * spd);
+  lastTs = ts;
+  idx = Math.floor(posF);
+  render(posF - idx);
+  if (posF >= ticks.length - 1) {{ playing = false;
+    $('pp').textContent = '▶ play'; return; }}
+  requestAnimationFrame(prangRaf);
+}}
+function frD(fr) {{
+  return {{arena: R.frames.arena, gy: R.frames.goal_y,
+    gz: R.frames.goal_z, pad: R.frames.pad, ball_r: R.frames.ball_r,
+    balls: Array.isArray(fr.b[0]) ? fr.b : [fr.b],
+    paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
+      team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
+      yaw: p[3], pitch: p[4]}}))}};
+}}
+function seek(i) {{ idx = i; posF = i; render(); }}
+function render(frac) {{
+  frac = frac || 0;
   $('seek').value = idx;
   if (mode === 'prang') {{
     const fr = ticks[idx];
     $('clock').textContent = 't+' + (fr.f / 60).toFixed(1) + 's';
     if (R.frames.kind === 'prang2') {{
       $('camb2').style.display = 'inline-block';
-      drawP2($('field'), {{arena: R.frames.arena, gy: R.frames.goal_y,
-        gz: R.frames.goal_z, pad: R.frames.pad, ball_r: R.frames.ball_r,
-        balls: Array.isArray(fr.b[0]) ? fr.b : [fr.b],
-        paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
-          team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
-          yaw: p[3], pitch: p[4]}}))}});
+      const a = frD(fr);
+      const nxt = ticks[idx + 1];
+      drawP2($('field'), (frac > 0 && nxt) ? p2lerp(a, frD(nxt), frac) : a);
       $('score').innerHTML = `<span class="w">west ${{fr.s.west}}</span>
         <span class="dim">—</span> <span class="e">${{fr.s.east}} east</span>`;
     }} else {{
@@ -1006,10 +1065,7 @@ async function broadcast() {{
       const f = w.frame;
       if (f.kind === 'prang2') {{
         $('camb').style.display = 'inline-block';
-        drawP2($('field'), {{arena: f.arena, gy: f.goal_y, gz: f.goal_z,
-          pad: f.pad, ball_r: f.ball_r,
-          balls: f.balls || [[f.ball.x, f.ball.y, f.ball.z]],
-          paddles: f.paddles}});
+        p2feed($('field'), f, () => done);
         $('score').innerHTML = `<span class="w">west ${{f.score.west}}</span>
           <span class="dim">—</span> <span class="e">${{f.score.east}} east</span>
           <span class="sub" style="font-size:13px">· ${{Math.ceil(f.frames_left/60)}}s left</span>`;
