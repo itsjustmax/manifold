@@ -20,7 +20,8 @@ def make_decider(spec: str):
         return {"converge": MockConverge, "hold": MockHold,
                 "fogline-brash": MockFoglineBrash,
                 "fogline-measured": MockFoglineMeasured,
-                "prang-chase": MockPrangChase}[arg]()
+                "prang-chase": MockPrangChase,
+                "prang-striker": MockPrangStriker}[arg]()
     if kind == "cmd":
         return CmdDecider(arg)
     if kind == "anthropic":
@@ -152,6 +153,62 @@ class MockFoglineMeasured:
                                "on synthesis.\n",
                 "strategy_md": "# Strategy\n\n- (mock) size follows "
                                "evidence.\n"}
+
+
+class MockPrangStriker:
+    """Role soccer, tuned in a headless physics lab: presser + sweeper
+    beat two ball-chasers 7W-7D-2L, 18-5 on goals, over 16 offset-seeded
+    matches. Position play is the edge — the chasers both abandon their
+    goal; the sweeper holds it. First seat of a team presses, second
+    sweeps (role = seat // 2)."""
+
+    def _steer(self, you, tx, ty, thrust_base, thrust_gain):
+        dx, dy = tx - you["x"], ty - you["y"]
+        want = math.degrees(math.atan2(dy, dx))
+        diff = (want - you["ang"] + 540) % 360 - 180
+        align = math.cos(math.radians(diff))
+        thrust = max(0.0, min(100.0, thrust_base + thrust_gain * align))
+        return diff, thrust
+
+    def decide(self, ctx):
+        v = ctx["view"]
+        you, ball = v.get("you"), v.get("ball")
+        if not you or not ball:
+            return {"action": "none"}
+        bx, by = ball["x"], ball["y"]
+        dist = math.hypot(bx - you["x"], by - you["y"])
+        g = v.get("goal_you_attack") or {}
+        gx = float(g.get("x", 0.0))
+        yr = g.get("y_range") or [450, 750]
+        gy = (float(yr[0]) + float(yr[1])) / 2
+        role = ((ctx.get("you") or {}).get("seat", 0)) // 2   # 0 press, 1 sweep
+
+        if role == 1 and dist >= 140:
+            # sweeper: hold a station 30% out from our own goal toward
+            # the ball; the field is 2000 wide, own goal mirrors attack
+            own_gx = 2000.0 - gx
+            tx = own_gx + 0.30 * (bx - own_gx)
+            ty = 600.0 + 0.30 * (by - 600.0)
+            d = math.hypot(tx - you["x"], ty - you["y"])
+            diff, thrust = self._steer(you, tx, ty, 30, 70)
+            thrust = 0.0 if d < 25 else thrust * min(1.0, d / 200)
+            reason = "holding the goal-side station"
+        else:
+            # presser: lead the served arc when far, take the ball when near
+            arc = ball.get("arc") or {}
+            tx, ty = (arc.get("f30") or [bx, by]) if dist > 140 else (bx, by)
+            diff, thrust = self._steer(you, tx, ty, 40, 60)
+            reason = "pressing the predicted ball"
+        shot = (math.degrees(math.atan2(gy - you["y"], gx - you["x"]))
+                - you["ang"] + 540) % 360 - 180
+        return {"action": "program",
+                "segments": [{"ms": 250, "thrust": round(thrust, 1),
+                              "turn": max(-180.0, min(180.0, round(diff * 4, 1))),
+                              "kick": dist < 90 and abs(shot) < 70}],
+                "reasoning": reason}
+
+    def reflect(self, ctx):
+        return None
 
 
 class MockPrangChase:

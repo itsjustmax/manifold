@@ -22,26 +22,46 @@ import sys
 import time
 import urllib.request
 
+# STABLE names: identity is the unit of learning. The same aster plays
+# every match, so reflection compounds in aster's playbook.md and the
+# leaderboard tracks a career, not a stranger per lobby.
 ROSTER = ["aster", "briar", "cove", "dune", "ember", "flint"]
 
 EXHIBITS = {
     "convergence": {
-        "params": {"round_seconds": 20, "expected_players": 3},
-        "seats": [("mock:converge", None)] * 3,
-        "timeout": 20 * 8 + 40,
+        "params": {"round_seconds": 30, "expected_players": 3},
+        "timeout": 30 * 8 + 60,
     },
     "fogline": {
         "params": {"tick_seconds": 45, "expected_players": 3},
-        "seats": [("mock:fogline-brash", None), ("mock:fogline-measured", None),
-                  ("mock:hold", None)],
-        "timeout": 45 * 6 + 60,
+        "timeout": 45 * 6 + 90,
     },
     "prang": {
         "params": {"match_seconds": 120, "expected_players": 4},
-        "seats": [("mock:prang-chase", 3)] * 4,
-        "timeout": 120 + 45,
+        "timeout": 120 + 60,
     },
 }
+
+
+def seats_for(game: str, anthropic: str | None) -> list[tuple[str, float | None]]:
+    """(decider, hz) per seat. With real minds, prang seats them beside
+    scripted strikers — a fixed baseline is how improvement becomes
+    measurable, and an API mind at 60Hz is neither possible nor the
+    point: it plays through longer committed programs at ~0.5Hz."""
+    a = f"anthropic:{anthropic}" if anthropic else None
+    if game == "convergence":
+        return [(a or "mock:converge", None)] * 3
+    if game == "fogline":
+        return ([(a, None)] * 3 if a else
+                [("mock:fogline-brash", None), ("mock:fogline-measured", None),
+                 ("mock:hold", None)])
+    # prang: seat parity is team assignment (even=west, odd=east), so
+    # [a, s, a, s] means west = the reasoning minds, east = the tuned
+    # scripted strikers: a fixed baseline the LLM team must learn to beat
+    if a:
+        return [(a, 0.5), ("mock:prang-striker", 3),
+                (a, 0.5), ("mock:prang-striker", 3)]
+    return [("mock:prang-striker", 3)] * 4
 
 
 def http(method: str, url: str, body: dict | None = None) -> dict:
@@ -61,13 +81,13 @@ def run_match(server: str, game: str, spec: dict, env: dict,
     print(f"[flagship] {game} {code} — curtain up "
           f"({server}/watch/{game}/{code})")
     pilots = []
-    for i, (decider, hz) in enumerate(spec["seats"]):
-        name = f"{ROSTER[i]}-{code.split('-')[1]}"
+    for i, (decider, hz) in enumerate(seats_for(game, anthropic)):
+        name = ROSTER[i]
         subprocess.run([sys.executable, "-m", "manifold_cli", "join",
                         server, game, "--code", code, "--name", name],
                        env=env, capture_output=True)
         cmd = [sys.executable, "-m", "manifold_cli", "pilot", "--as", name,
-               "--decider", anthropic or decider]
+               "--decider", decider]
         if hz:
             cmd += ["--hz", str(hz)]
         pilots.append(subprocess.Popen(cmd, env=env,
