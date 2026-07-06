@@ -60,10 +60,14 @@ function drawP2(cv, D){
   const bp = P(bx,by,bz), br = 5 + 4*(1 - by/A[1]);
   cx.fillStyle = '#fff';
   cx.beginPath(); cx.arc(bp[0],bp[1],br,0,7); cx.fill();
-  // paddles: the ACTUAL rotated rectangular face, projected — the
-  // orientation is the shot, so the quad is the story — plus a long
-  // aim spike along the face normal
-  const [HW, HH] = D.pad || [1600, 1000];
+  // paddles: physically sub-pixel on a court this vast, so draw at a
+  // fixed SCREEN size with the TRUE orientation — project the face
+  // axes, normalize to pixels. The tilt you see is the tilt that is.
+  const norm = (vpx) => {
+    const m = Math.hypot(vpx[0], vpx[1]) || 1;
+    return [vpx[0]/m, vpx[1]/m];
+  };
+  const L = A[0] * 0.02;               // probe length for projecting axes
   for (const p of D.paddles) {
     const ya = p.yaw*Math.PI/180, pi = p.pitch*Math.PI/180;
     const cyw = Math.cos(ya), syw = Math.sin(ya);
@@ -71,30 +75,33 @@ function drawP2(cv, D){
     const n  = [cpt*cyw, cpt*syw, spt];
     const t1 = [-syw, cyw, 0];
     const t2 = [-spt*cyw, -spt*syw, cpt];
-    const corner = (su, sv) => P(
-      p.x + su*HW*t1[0] + sv*HH*t2[0],
-      p.y + su*HW*t1[1] + sv*HH*t2[1],
-      p.z + su*HW*t1[2] + sv*HH*t2[2]);
-    const q = [corner(-1,-1), corner(1,-1), corner(1,1), corner(-1,1)];
-    const psh = P(p.x,p.y,0);
+    const pp = P(p.x, p.y, p.z);
+    const ax = (v) => {
+      const q = P(p.x + v[0]*L, p.y + v[1]*L, p.z + v[2]*L);
+      return norm([q[0]-pp[0], q[1]-pp[1]]);
+    };
+    const u1 = ax(t1), u2 = ax(t2), un = ax(n);
+    const HWpx = 16, HHpx = 10;
+    const q = [[-1,-1],[1,-1],[1,1],[-1,1]].map(([su,sv]) =>
+      [pp[0] + su*HWpx*u1[0] + sv*HHpx*u2[0],
+       pp[1] + su*HWpx*u1[1] + sv*HHpx*u2[1]]);
+    const psh = P(p.x, p.y, 0);
     cx.fillStyle = 'rgba(0,0,0,0.30)';
-    cx.beginPath(); cx.ellipse(psh[0],psh[1],14,5,0,0,7); cx.fill();
-    cx.fillStyle = p.team === 'west' ? 'rgba(77,163,255,0.40)'
-                                     : 'rgba(255,157,77,0.40)';
+    cx.beginPath(); cx.ellipse(psh[0],psh[1],10,4,0,0,7); cx.fill();
+    cx.fillStyle = p.team === 'west' ? 'rgba(77,163,255,0.45)'
+                                     : 'rgba(255,157,77,0.45)';
     cx.strokeStyle = p.team === 'west' ? '#4da3ff' : '#ff9d4d';
     cx.lineWidth = 2;
     cx.beginPath(); cx.moveTo(...q[0]);
     q.slice(1).forEach(c => cx.lineTo(...c));
     cx.closePath(); cx.fill(); cx.stroke();
     cx.lineWidth = 1;
-    const pp = P(p.x,p.y,p.z);
-    const L = HW*2.2;
-    const tip = P(p.x + n[0]*L, p.y + n[1]*L, p.z + n[2]*L);
+    const tip = [pp[0] + un[0]*34, pp[1] + un[1]*34];
     line(pp, tip, '#dbe4ff');
     cx.fillStyle = '#dbe4ff';
     cx.beginPath(); cx.arc(tip[0], tip[1], 2.5, 0, 7); cx.fill();
     cx.font = '11px monospace';
-    cx.fillText(p.name, q[2][0]+6, q[2][1]-6);
+    cx.fillText(p.name, pp[0]+18, pp[1]-12);
   }
 }
 """

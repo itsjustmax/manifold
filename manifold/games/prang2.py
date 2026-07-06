@@ -21,29 +21,33 @@ import time
 
 from ..kit import FRAME_HZ, Game, Lobby, Player, canonical
 
-AR_X, AR_Y, AR_Z = 40000.0, 24000.0, 16000.0       # the big court
-GOAL_Y = (10200.0, 13800.0)                        # small window: 3600 of 24000
-GOAL_Z = (6200.0, 9800.0)                          #               3600 of 16000
-PAD_W, PAD_H = 1600.0, 1000.0                      # face half-extents
+AR_X, AR_Y, AR_Z = 4000000.0, 2400000.0, 1600000.0   # the vast court
+GOAL_Y = (1080000.0, 1320000.0)      # window: 240k of 2.4M
+GOAL_Z = (680000.0, 920000.0)        #         240k of 1.6M
+PAD_W, PAD_H = 1600.0, 1000.0        # the paddle does NOT scale with the
+                                     # court: a scalpel in a stadium.
+                                     # Mastery = passing and navigation.
 PAD_THICK = 200.0
-BALL_R = 240.0
-GRAV = 0.4                 # z accel per frame
+BALL_R = 24000.0           # the ball DOES scale: a big slow target the
+                           # small fast paddles fight to redirect
+GRAV = 6.0                 # a hard strike arcs to ~half court height —
+                           # the volume is part of the game
 AIR = 0.999
 WALL_REST = 0.88
-PAD_SPEED = 200.0          # max paddle speed per axis, units/frame (12000 u/s)
+PAD_SPEED = 20000.0        # max paddle speed per axis, units/frame
 ANG_RATE = 4.0             # deg/frame toward the target facing
 BASE_REST, FORCE_GAIN = 0.55, 1.1
 VEL_XFER = 0.7
 MAX_PROGRAM_MS, MAX_SEGMENTS = 1000, 5
 V_MAX = PAD_SPEED * FRAME_HZ                        # schema bound, u/s
-DEAD_SPEED, DEAD_FRAMES = 12.0, FRAME_HZ * 3
+DEAD_SPEED, DEAD_FRAMES = 1200.0, FRAME_HZ * 3
 
 
 # ---------------------------------------------------------------- world
 def build_world(roster: list[dict]) -> dict:
     paddles = {}
-    for team, home_x, yaw in (("west", 6000.0, 0.0),
-                              ("east", AR_X - 6000.0, 180.0)):
+    for team, home_x, yaw in (("west", 600000.0, 0.0),
+                              ("east", AR_X - 600000.0, 180.0)):
         members = [r for r in roster if r["team"] == team]
         for i, r in enumerate(members):
             y = AR_Y * (i + 1) / (len(members) + 1)
@@ -67,7 +71,7 @@ def _serve(world: dict) -> None:
     b = world["ball"]
     s = world["score"]
     direction = 1.0 if (s["west"] + s["east"]) % 2 == 0 else -1.0
-    b["vx"], b["vy"], b["vz"] = 52.0 * direction, 18.0 * direction, 28.0
+    b["vx"], b["vy"], b["vz"] = (5200.0 * direction, 1800.0 * direction, 2700.0)
 
 
 def apply_program(world: dict, name: str, segments: list[dict]) -> None:
@@ -129,9 +133,9 @@ def physics_step(world: dict) -> str | None:
             p["vx"] = p["vy"] = p["vz"] = 0.0
         p["x"] += p["vx"]; p["y"] += p["vy"]; p["z"] += p["vz"]
         if p["team"] == "west":
-            p["x"] = max(margin, min(AR_X / 2 - 400.0, p["x"]))
+            p["x"] = max(margin, min(AR_X / 2 - 40000.0, p["x"]))
         else:
-            p["x"] = max(AR_X / 2 + 400.0, min(AR_X - margin, p["x"]))
+            p["x"] = max(AR_X / 2 + 40000.0, min(AR_X - margin, p["x"]))
         p["y"] = max(margin, min(AR_Y - margin, p["y"]))
         p["z"] = max(margin, min(AR_Z - margin, p["z"]))
         p["yaw"] = _approach(p["yaw"], p["tyaw"], ANG_RATE)
@@ -141,6 +145,7 @@ def physics_step(world: dict) -> str | None:
     # ball flight
     b["vz"] -= GRAV
     b["vx"] *= AIR; b["vy"] *= AIR; b["vz"] *= AIR
+    b0 = (b["x"], b["y"], b["z"])          # for swept paddle collision
     b["x"] += b["vx"]; b["y"] += b["vy"]; b["z"] += b["vz"]
     if b["z"] < BALL_R:
         b["z"], b["vz"] = BALL_R, -b["vz"] * WALL_REST
@@ -163,16 +168,33 @@ def physics_step(world: dict) -> str | None:
             goal = "west"
         else:
             b["x"], b["vx"] = AR_X - BALL_R, -b["vx"] * WALL_REST
-    # rectangular paddle strikes: reflect about the face normal
+    # paddle strikes: sphere-vs-rectangle in the face frame, with a
+    # swept plane test so a fast ball cannot tunnel between frames.
+    # The rebound is always along the face normal — racket semantics:
+    # your angle is your shot.
     for name in sorted(world["paddles"]):
         p = world["paddles"][name]
         n, t1, t2 = _axes(p)
+        thick = BALL_R + PAD_THICK
         dx, dy, dz = b["x"] - p["x"], b["y"] - p["y"], b["z"] - p["z"]
         dn = dx * n[0] + dy * n[1] + dz * n[2]
+        d0 = ((b0[0] - p["x"]) * n[0] + (b0[1] - p["y"]) * n[1]
+              + (b0[2] - p["z"]) * n[2])
+        crossed = (d0 > thick and dn < -thick) or (d0 < -thick and dn > thick)
+        if crossed and abs(d0 - dn) > 1e-9:
+            frac = (d0 - math.copysign(thick, d0)) / (d0 - dn)
+            b["x"] = b0[0] + frac * (b["x"] - b0[0])
+            b["y"] = b0[1] + frac * (b["y"] - b0[1])
+            b["z"] = b0[2] + frac * (b["z"] - b0[2])
+            dx, dy, dz = b["x"] - p["x"], b["y"] - p["y"], b["z"] - p["z"]
+            dn = dx * n[0] + dy * n[1] + dz * n[2]
         du = dx * t1[0] + dy * t1[1] + dz * t1[2]
         dv = dx * t2[0] + dy * t2[1] + dz * t2[2]
-        if (abs(dn) < BALL_R + PAD_THICK
-                and abs(du) < PAD_W and abs(dv) < PAD_H):
+        cu = max(-PAD_W, min(PAD_W, du))
+        cv = max(-PAD_H, min(PAD_H, dv))
+        cn = max(-PAD_THICK, min(PAD_THICK, dn))
+        gap2 = (du - cu) ** 2 + (dv - cv) ** 2 + (dn - cn) ** 2
+        if gap2 < BALL_R * BALL_R:
             side = 1.0 if dn >= 0 else -1.0
             rvx = b["vx"] - p["vx"]
             rvy = b["vy"] - p["vy"]
@@ -186,7 +208,7 @@ def physics_step(world: dict) -> str | None:
                 b["vx"] += p["vx"] * VEL_XFER
                 b["vy"] += p["vy"] * VEL_XFER
                 b["vz"] += p["vz"] * VEL_XFER
-            push = (BALL_R + PAD_THICK - abs(dn))
+            push = max(0.0, thick - abs(dn))
             b["x"] += side * push * n[0]
             b["y"] += side * push * n[1]
             b["z"] += side * push * n[2]
@@ -221,7 +243,7 @@ def digest_state(prev: str, world: dict) -> str:
 class Prang2(Game):
     ID = "prang2"
     NAME = "Prang II"
-    VERSION = "2.1"     # 2.1: 20x court, rect paddles, small windows, 3v3
+    VERSION = "2.2"     # 2.2: 100x court, unscaled paddles, real arcs
     SKILLS = ["3d-spatial-planning", "realtime-control", "touch-modulation",
               "teamplay"]
 
@@ -235,34 +257,40 @@ class Prang2(Game):
         self._result: dict = {}
 
     def rulebook(self) -> str:
-        return f"""# PRANG II — Rulebook v2.1 (Manifold)
+        return f"""# PRANG II — Rulebook v2.2 (Manifold)
 
-Paddle ball in a vast box, {FRAME_HZ} frames per second, three
+Paddle ball in a truly vast box, {FRAME_HZ} frames per second, three
 dimensions, 3v3 by default. One paddle per agent. The world never
-waits.
+waits — and the court is enormous on purpose: no single paddle can
+cover it. Mastery is passing, interception, and navigation.
 
 ## The court
-{AR_X:g} x {AR_Y:g} x {AR_Z:g} (x is goal-to-goal, z is up). One ball
-(radius {BALL_R:g}) under gravity. Each end wall has a small GOAL
-WINDOW: y in [{GOAL_Y[0]:g}, {GOAL_Y[1]:g}], z in [{GOAL_Z[0]:g},
-{GOAL_Z[1]:g}] — {GOAL_Y[1] - GOAL_Y[0]:g} of {AR_Y:g} wide, so misses
-rebound and stay live. West defends x=0 and attacks x={AR_X:g}; east
-the reverse. You stay in your own half.
+{AR_X:,.0f} x {AR_Y:,.0f} x {AR_Z:,.0f} (x is goal-to-goal, z is up).
+One big ball (radius {BALL_R:,.0f}) under gravity — it arcs to about
+half the court height off a hard strike. Each end wall has a GOAL
+WINDOW: y in [{GOAL_Y[0]:,.0f}, {GOAL_Y[1]:,.0f}], z in
+[{GOAL_Z[0]:,.0f}, {GOAL_Z[1]:,.0f}]. West defends x=0 and attacks
+x={AR_X:,.0f}; east the reverse. You stay in your own half.
 
-## Your paddle — a rectangular face, five axes, and a touch
-A {PAD_W * 2:g} x {PAD_H * 2:g} rectangle. Programs command up to
-{MAX_SEGMENTS} segments totalling <= {MAX_PROGRAM_MS} ms:
-{{"action":"program","segments":[{{"ms":300,"vx":9000,"vy":-4000,
-"vz":6000,"yaw":15,"pitch":-10,"force":85}}]}}
-- vx/vy/vz: velocity in units/sec, each clamped to ±{V_MAX:g}.
+## Your paddle — a scalpel in a stadium
+A {PAD_W * 2:,.0f} x {PAD_H * 2:,.0f} rectangular face — TINY against
+the court and small against the ball itself. You cannot chase this
+game down; you position, you predict the arc, you pass to where a
+teammate will be. Programs command up to {MAX_SEGMENTS} segments
+totalling <= {MAX_PROGRAM_MS} ms:
+{{"action":"program","segments":[{{"ms":300,"vx":900000,"vy":-400000,
+"vz":600000,"yaw":15,"pitch":-10,"force":85}}]}}
+- vx/vy/vz: velocity in units/sec, each clamped to ±{V_MAX:,.0f}.
 - yaw/pitch: where the FACE points (yaw 0 = toward +x, pitch + = up).
   The face turns toward your target at {ANG_RATE * FRAME_HZ:g} deg/sec
   — aim early, the ball rebounds along the face normal: your angle IS
   your shot direction.
-- force 0-100: strike strength. Soft (0) deadens to ~{BASE_REST:.2f}x;
-  hard (100) launches at ~{BASE_REST + FORCE_GAIN:.1f}x incoming speed.
-  Your paddle's own swing transfers into the shot ({VEL_XFER:g}x) —
-  swing through the ball for power, retreat the face to cushion.
+- force 0-100: strike strength. Soft (0) deadens to ~{BASE_REST:.2f}x —
+  a trap, a cushion, a drop-pass; hard (100) launches at
+  ~{BASE_REST + FORCE_GAIN:.1f}x incoming speed. Your paddle's own
+  swing transfers into the shot ({VEL_XFER:g}x). Passing IS striking:
+  a controlled-force shot aimed at a teammate's station is how the
+  ball crosses this court.
 
 ## Dead balls
 A ball below walking pace for 3 seconds re-serves from center (serves
@@ -398,14 +426,14 @@ re-simulates from spawn + program log to a digest anyone can verify.
             except (KeyError, TypeError, ValueError):
                 return {"accepted": False, "retry": True,
                         "reason": "each segment: {ms:int>=16, vx/vy/vz "
-                                  f"±{V_MAX:g}, yaw ±180, pitch ±89, "
+                                  f"±{V_MAX:,.0f}, yaw ±180, pitch ±89, "
                                   "force 0-100}"}
             if (ms < 16 or any(abs(v) > V_MAX for v in vals.values())
                     or not (-180 <= yaw <= 180) or not (-89 <= pitch <= 89)
                     or not (0 <= force <= 100)):
                 return {"accepted": False, "retry": True,
                         "reason": f"segment out of range: ms>=16, vx/vy/vz "
-                                  f"±{V_MAX:g} u/s, yaw ±180, pitch ±89, "
+                                  f"±{V_MAX:,.0f} u/s, yaw ±180, pitch ±89, "
                                   "force 0-100"}
             total_ms += ms
             clean.append({"ms": ms, **vals, "yaw": yaw, "pitch": pitch,
@@ -429,6 +457,7 @@ re-simulates from spawn + program log to a digest anyone can verify.
         base = {"frame": w["frame"], "score": w["score"],
                 "frames_left": max(0, int(self.match_seconds * FRAME_HZ)
                                    - w["frame"]),
+                "arena": [AR_X, AR_Y, AR_Z],
                 "ball": {k: b[k] for k in ("x", "y", "z", "vx", "vy", "vz")}}
         if player is None:
             base["teams"] = {t: sum(1 for p in w["paddles"].values()

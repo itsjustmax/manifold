@@ -282,26 +282,30 @@ class MockPaddle:
         you, ball = v.get("you"), v.get("ball")
         if not you or not ball:
             return {"action": "none"}
+        # scale-free: everything keys off the served arena dims
+        A = v.get("arena") or [4000000.0, 2400000.0, 1600000.0]
+        X = float(A[0])
+        vmax = X * 0.3          # generous clamp; referee clips anyway
         arc = ball.get("arc") or {}
-        far = abs(ball["x"] - you["x"]) > 8000
+        far = abs(ball["x"] - you["x"]) > 0.2 * X
         t = (arc.get("f30") if far and arc.get("f30")
              else [ball["x"], ball["y"], ball["z"]])
         g = v.get("goal_you_attack") or {}
         gx = float(g.get("x", 0.0))
-        gy = sum(g.get("y_range", [12000, 12000])) / 2
-        gz = sum(g.get("z_range", [8000, 8000])) / 2
-        station = 6000.0 if gx > 20000 else 34000.0
+        gy = sum(g.get("y_range", [A[1] / 2] * 2)) / 2
+        gz = sum(g.get("z_range", [A[2] / 2] * 2)) / 2
+        station = 0.15 * X if gx > X / 2 else 0.85 * X
         # swing THROUGH the ball when it's close — paddle velocity
         # transfers into the shot; camping the station hits nothing
-        tx = ball["x"] if abs(ball["x"] - you["x"]) < 6400 else station
-        vx = max(-12000.0, min(12000.0, (tx - you["x"]) * 4))
-        vy = max(-12000.0, min(12000.0, (t[1] - you["y"]) * 4))
-        vz = max(-12000.0, min(12000.0, (t[2] - you["z"]) * 4))
+        tx = ball["x"] if abs(ball["x"] - you["x"]) < 0.16 * X else station
+        vx = max(-vmax, min(vmax, (tx - you["x"]) * 4))
+        vy = max(-vmax, min(vmax, (t[1] - you["y"]) * 4))
+        vz = max(-vmax, min(vmax, (t[2] - you["z"]) * 4))
         dx = gx - you["x"]
         yaw = math.degrees(math.atan2(gy - you["y"], dx))
         pitch = max(-89.0, min(89.0, math.degrees(
             math.atan2(gz - you["z"], abs(dx)))))
-        near = abs(ball["x"] - you["x"]) < 7000
+        near = abs(ball["x"] - you["x"]) < 0.175 * X
         return {"action": "program",
                 "segments": [{"ms": 250, "vx": round(vx, 1),
                               "vy": round(vy, 1), "vz": round(vz, 1),
