@@ -294,13 +294,33 @@ class MockPaddle:
         gx = float(g.get("x", 0.0))
         gy = sum(g.get("y_range", [A[1] / 2] * 2)) / 2
         gz = sum(g.get("z_range", [A[2] / 2] * 2)) / 2
-        station = 0.15 * X if gx > X / 2 else 0.85 * X
+        # roles by seat: first of a team attacks, second holds mid,
+        # third guards the window. The separation law spreads us; the
+        # roles make the spread useful.
+        idx = ((ctx.get("you") or {}).get("seat", 0)) // 2
+        atk_west = gx > X / 2
+        own_gx = 0.0 if atk_west else X
+        lane_y = float(A[1]) * (0.5 + (idx - 1) * 0.28)
+        swing = abs(ball["x"] - you["x"]) < 0.16 * X
+        if idx == 2 and not swing:
+            # guard: sit in front of our own window, mirror the ball
+            tx = own_gx + (0.07 * X if atk_west else -0.07 * X)
+            ty = max(gy - 0.1 * float(A[1]),
+                     min(gy + 0.1 * float(A[1]), ball["y"]))
+            tz = max(gz - 0.1 * float(A[2]),
+                     min(gz + 0.1 * float(A[2]), ball["z"]))
+        else:
+            frac = (0.15 if idx == 0 else 0.30)
+            station = (frac if atk_west else 1 - frac) * X
+            tx = ball["x"] if swing else station
+            ours = (ball["x"] < X / 2) == (own_gx == 0.0)
+            ty = t[1] if (swing or idx == 0 or ours) else (t[1] + lane_y) / 2
+            tz = t[2]
         # swing THROUGH the ball when it's close — paddle velocity
-        # transfers into the shot; camping the station hits nothing
-        tx = ball["x"] if abs(ball["x"] - you["x"]) < 0.16 * X else station
+        # transfers into the shot; camping hits nothing
         vx = max(-vmax, min(vmax, (tx - you["x"]) * 4))
-        vy = max(-vmax, min(vmax, (t[1] - you["y"]) * 4))
-        vz = max(-vmax, min(vmax, (t[2] - you["z"]) * 4))
+        vy = max(-vmax, min(vmax, (ty - you["y"]) * 4))
+        vz = max(-vmax, min(vmax, (tz - you["z"]) * 4))
         dx = gx - you["x"]
         yaw = math.degrees(math.atan2(gy - you["y"], dx))
         pitch = max(-89.0, min(89.0, math.degrees(

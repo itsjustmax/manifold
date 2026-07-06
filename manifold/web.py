@@ -23,6 +23,12 @@ REPO_DEFAULT = "https://github.com/itsjustmax/manifold"
 # D = {arena:[X,Y,Z], gy:[..], gz:[..], ball:[x,y,z],
 #      paddles:[{name,team,x,y,z,yaw,pitch}], score:{west,east}}
 _P2_JS = r"""
+let P2CAM = {x: null, y: 0, z: 0};
+let P2FOLLOW = true;
+function p2ToggleCam(btn){
+  P2FOLLOW = !P2FOLLOW;
+  if (btn) btn.textContent = P2FOLLOW ? 'cam: follow' : 'cam: full court';
+}
 function p2proj(A, cw, ch){
   return (x,y,z) => [60 + (x/A[0])*(cw-170) + (y/A[1])*52,
                      (ch-64) - (z/A[2])*(ch-168) - (y/A[1])*44];
@@ -30,7 +36,19 @@ function p2proj(A, cw, ch){
 function drawP2(cv, D){
   const cx = cv.getContext('2d'), A = D.arena;
   cx.clearRect(0,0,cv.width,cv.height);
-  const P = p2proj(A, cv.width, cv.height);
+  // follow cam: smooth-track the ball at zoom; full court on toggle
+  const [Bx,By,Bz] = D.ball;
+  if (P2CAM.x === null) P2CAM = {x:Bx, y:By, z:Bz};
+  P2CAM.x += (Bx-P2CAM.x)*0.10; P2CAM.y += (By-P2CAM.y)*0.10;
+  P2CAM.z += (Bz-P2CAM.z)*0.10;
+  const Z = P2FOLLOW ? 5 : 1;
+  const cmx = P2FOLLOW ? P2CAM.x : A[0]/2;
+  const cmy = P2FOLLOW ? P2CAM.y : A[1]/2;
+  const cmz = P2FOLLOW ? P2CAM.z : A[2]/2;
+  const base = p2proj(A, cv.width, cv.height);
+  const P = (x,y,z) => base(A[0]/2 + (x-cmx)*Z,
+                            A[1]/2 + (y-cmy)*Z,
+                            A[2]/2 + (z-cmz)*Z);
   const line = (a,b,st) => { cx.strokeStyle=st||'#1f2b4d'; cx.beginPath();
     cx.moveTo(...a); cx.lineTo(...b); cx.stroke(); };
   const C = [[0,0,0],[A[0],0,0],[A[0],A[1],0],[0,A[1],0],
@@ -55,9 +73,11 @@ function drawP2(cv, D){
   // ball shadow on the floor, then the ball (size hints depth)
   const [bx,by,bz] = D.ball;
   const sh = P(bx,by,0);
+  const br = Math.max(5, Math.min(60,
+    ((D.ball_r || A[2]*0.015) / A[2]) * (cv.height-168) * Z));
   cx.fillStyle = 'rgba(0,0,0,0.45)';
-  cx.beginPath(); cx.ellipse(sh[0],sh[1],9,3.5,0,0,7); cx.fill();
-  const bp = P(bx,by,bz), br = 5 + 4*(1 - by/A[1]);
+  cx.beginPath(); cx.ellipse(sh[0],sh[1],br*0.9,br*0.35,0,0,7); cx.fill();
+  const bp = P(bx,by,bz);
   cx.fillStyle = '#fff';
   cx.beginPath(); cx.arc(bp[0],bp[1],br,0,7); cx.fill();
   // paddles: physically sub-pixel on a court this vast, so draw at a
@@ -102,6 +122,30 @@ function drawP2(cv, D){
     cx.beginPath(); cx.arc(tip[0], tip[1], 2.5, 0, 7); cx.fill();
     cx.font = '11px monospace';
     cx.fillText(p.name, pp[0]+18, pp[1]-12);
+  }
+  // minimap (top view): whole court, everyone, the camera window
+  const mw = 170, mh = Math.round(mw*A[1]/A[0]);
+  const mx0 = cv.width-mw-14, my0 = 12;
+  cx.fillStyle = 'rgba(10,16,32,0.85)';
+  cx.fillRect(mx0-4,my0-4,mw+8,mh+8);
+  cx.strokeStyle = '#2a3a63'; cx.strokeRect(mx0,my0,mw,mh);
+  const M = (x,y) => [mx0 + x/A[0]*mw, my0 + y/A[1]*mh];
+  const gy0 = M(0,D.gy[0])[1], gy1 = M(0,D.gy[1])[1];
+  cx.fillStyle = '#ffd166';
+  cx.fillRect(mx0-3, gy0, 3, gy1-gy0);
+  cx.fillRect(mx0+mw, gy0, 3, gy1-gy0);
+  for (const p of D.paddles){
+    const m = M(p.x,p.y);
+    cx.fillStyle = p.team==='west' ? '#4da3ff' : '#ff9d4d';
+    cx.fillRect(m[0]-2, m[1]-2, 4, 4);
+  }
+  const mb = M(Bx,By);
+  cx.fillStyle = '#fff';
+  cx.beginPath(); cx.arc(mb[0],mb[1],3,0,7); cx.fill();
+  if (P2FOLLOW){
+    const tl = M(Math.max(0,cmx-A[0]/(2*Z)), Math.max(0,cmy-A[1]/(2*Z)));
+    cx.strokeStyle = '#dbe4ff';
+    cx.strokeRect(tl[0], tl[1], mw/Z, mh/Z);
   }
 }
 """
@@ -585,6 +629,8 @@ select {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
       <div id="genbox" style="display:none"><div id="feed"></div></div>
       <div style="margin-top:12px">
         <button id="pp" onclick="toggle()">▶ play</button>
+        <button id="camb2" onclick="p2ToggleCam(this)"
+          style="display:none">cam: follow</button>
         <select id="speed" onchange="spd=+this.value">
           <option value="1">1x</option><option value="2">2x</option>
           <option value="4">4x</option></select>
@@ -668,8 +714,10 @@ function render() {{
     const fr = ticks[idx];
     $('clock').textContent = 't+' + (fr.f / 60).toFixed(1) + 's';
     if (R.frames.kind === 'prang2') {{
+      $('camb2').style.display = 'inline-block';
       drawP2($('field'), {{arena: R.frames.arena, gy: R.frames.goal_y,
-        gz: R.frames.goal_z, pad: R.frames.pad, ball: fr.b,
+        gz: R.frames.goal_z, pad: R.frames.pad, ball_r: R.frames.ball_r,
+        ball: fr.b,
         paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
           team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
           yaw: p[3], pitch: p[4]}}))}});
@@ -776,6 +824,10 @@ def watch_page(game_id: str, code: str) -> str:
   <div>
     <div class="panel" id="fieldbox" style="display:none">
       <div class="score" id="score"></div>
+      <button id="camb" onclick="p2ToggleCam(this)" style="display:none;
+        background:#1a2547;color:var(--ink);border:1px solid var(--edge);
+        border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer;
+        margin-bottom:6px">cam: follow</button>
       <canvas id="field" width="1000" height="600"></canvas>
     </div>
     <div class="panel" id="convbox" style="display:none">
@@ -936,8 +988,10 @@ async function broadcast() {{
       $('viewbox').style.display = 'none';
       const f = w.frame;
       if (f.kind === 'prang2') {{
+        $('camb').style.display = 'inline-block';
         drawP2($('field'), {{arena: f.arena, gy: f.goal_y, gz: f.goal_z,
-          pad: f.pad, ball: [f.ball.x, f.ball.y, f.ball.z],
+          pad: f.pad, ball_r: f.ball_r,
+          ball: [f.ball.x, f.ball.y, f.ball.z],
           paddles: f.paddles}});
         $('score').innerHTML = `<span class="w">west ${{f.score.west}}</span>
           <span class="dim">—</span> <span class="e">${{f.score.east}} east</span>

@@ -41,6 +41,8 @@ VEL_XFER = 0.7
 MAX_PROGRAM_MS, MAX_SEGMENTS = 1000, 5
 V_MAX = PAD_SPEED * FRAME_HZ                        # schema bound, u/s
 DEAD_SPEED, DEAD_FRAMES = 1200.0, FRAME_HZ * 3
+SEP_DIST = 180000.0        # teammates repel inside this: stacking is
+                           # physically impossible, spacing is law
 
 
 # ---------------------------------------------------------------- world
@@ -142,6 +144,32 @@ def physics_step(world: dict) -> str | None:
         p["pitch"] = max(-89.0, min(89.0,
                          p["pitch"] + max(-ANG_RATE, min(ANG_RATE,
                                           p["tpitch"] - p["pitch"]))))
+    # personal space: teammates repel — a stack of paddles is not a
+    # formation. Deterministic pairwise push, then re-clamp to bounds.
+    ordered = sorted(world["paddles"])
+    for i in range(len(ordered)):
+        for j in range(i + 1, len(ordered)):
+            a = world["paddles"][ordered[i]]
+            c = world["paddles"][ordered[j]]
+            if a["team"] != c["team"]:
+                continue
+            sx, sy, sz = c["x"] - a["x"], c["y"] - a["y"], c["z"] - a["z"]
+            d = math.sqrt(sx * sx + sy * sy + sz * sz)
+            if d >= SEP_DIST:
+                continue
+            if d < 1e-9:
+                c["y"] += SEP_DIST / 2      # exact overlap: split cleanly
+                continue
+            half = (SEP_DIST - d) / (2.0 * d)
+            a["x"] -= sx * half; a["y"] -= sy * half; a["z"] -= sz * half
+            c["x"] += sx * half; c["y"] += sy * half; c["z"] += sz * half
+    for p2 in world["paddles"].values():
+        if p2["team"] == "west":
+            p2["x"] = max(margin, min(AR_X / 2 - 40000.0, p2["x"]))
+        else:
+            p2["x"] = max(AR_X / 2 + 40000.0, min(AR_X - margin, p2["x"]))
+        p2["y"] = max(margin, min(AR_Y - margin, p2["y"]))
+        p2["z"] = max(margin, min(AR_Z - margin, p2["z"]))
     # ball flight
     b["vz"] -= GRAV
     b["vx"] *= AIR; b["vy"] *= AIR; b["vz"] *= AIR
@@ -243,7 +271,7 @@ def digest_state(prev: str, world: dict) -> str:
 class Prang2(Game):
     ID = "prang2"
     NAME = "Prang II"
-    VERSION = "2.2"     # 2.2: 100x court, unscaled paddles, real arcs
+    VERSION = "2.3"     # 2.3: teammate separation law + follow cam
     SKILLS = ["3d-spatial-planning", "realtime-control", "touch-modulation",
               "teamplay"]
 
@@ -291,6 +319,11 @@ totalling <= {MAX_PROGRAM_MS} ms:
   swing transfers into the shot ({VEL_XFER:g}x). Passing IS striking:
   a controlled-force shot aimed at a teammate's station is how the
   ball crosses this court.
+
+## Spacing is law
+Teammates inside {SEP_DIST:,.0f} units of each other are pushed apart
+by the referee — stacking on the ball line is physically impossible.
+Spread, hold lanes, and pass; the court is too big for a mob.
 
 ## Dead balls
 A ball below walking pace for 3 seconds re-serves from center (serves
@@ -530,7 +563,7 @@ re-simulates from spawn + program log to a digest anyone can verify.
         return {"kind": "prang2", "fps": FRAME_HZ / step,
                 "arena": [AR_X, AR_Y, AR_Z],
                 "goal_y": list(GOAL_Y), "goal_z": list(GOAL_Z),
-                "pad": [PAD_W, PAD_H],
+                "pad": [PAD_W, PAD_H], "ball_r": BALL_R,
                 "teams": {r["name"]: r["team"]
                           for r in setup["data"]["roster"]},
                 "frames": frames}
@@ -544,7 +577,7 @@ re-simulates from spawn + program log to a digest anyone can verify.
                                    - w["frame"]),
                 "arena": [AR_X, AR_Y, AR_Z],
                 "goal_y": list(GOAL_Y), "goal_z": list(GOAL_Z),
-                "pad": [PAD_W, PAD_H],
+                "pad": [PAD_W, PAD_H], "ball_r": BALL_R,
                 "ball": {k: w["ball"][k] for k in ("x", "y", "z")},
                 "paddles": [{"name": n, "x": p["x"], "y": p["y"],
                              "z": p["z"], "yaw": p["yaw"],
