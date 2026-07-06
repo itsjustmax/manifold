@@ -59,6 +59,9 @@ manifold/games/
   fogline_core/        v0-proven scoring + sealed-package modules; treat as stable
   prang.py             60Hz realtime soccer; physics_step is PURE and shared
                        with the replay verifier — keep it that way
+  prang2.py            60Hz 3D paddle ball: 5 axes (xyz + yaw/pitch) + force;
+                       same pure-physics/verifier law; dead-ball re-serve rule
+                       (T9 covers it; --verify CLI like prang)
 manifold_cli/
   __main__.py          the universal pilot. MUST stay game-agnostic (T4 greps it)
   deciders.py          minds: mock:* (tests), cmd: (universal socket), anthropic:
