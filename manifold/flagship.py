@@ -92,6 +92,7 @@ def run_match(server: str, game: str, spec: dict, env: dict,
 
 
 def main() -> int:
+    sys.stdout.reconfigure(line_buffering=True)   # logs stream under nohup
     ap = argparse.ArgumentParser(prog="manifold.flagship")
     ap.add_argument("server")
     ap.add_argument("--interval", type=float, default=90,
