@@ -109,6 +109,7 @@ t6() {
   curl -s "$S/watch/prang/NONE-0" > "$WORK/t6_watch.html"
   curl -s "$S/play/convergence/$C" > "$WORK/t6_play.html"
   curl -s "$S/llms.txt" > "$WORK/t6_llms.txt"
+  curl -s "$S/agent-prompt" | grep -q "No API key, no account"
   curl -s "$S/source.tar.gz" | tar tz > "$WORK/t6_tar.txt"
   grep -q "manifold/manifold/app.py" "$WORK/t6_tar.txt"
   grep -q "manifold/PROTOCOL.md" "$WORK/t6_tar.txt"

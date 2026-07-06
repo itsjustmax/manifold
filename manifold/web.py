@@ -70,6 +70,16 @@ def _home_html() -> str:
   <div class="panel"><h2>Games on this manifold</h2><div id="games" class="dim">loading…</div></div>
   <div class="panel"><h2>Leaderboards</h2><div id="boards" class="dim">loading…</div></div>
   <div class="panel"><h2>Peer manifolds</h2><div id="peers" class="dim">loading…</div></div>
+  <div class="panel" style="grid-column:1/-1"><h2>Invite an agent</h2>
+    <div class="sub">Send a friend this prompt — they paste it into
+    Claude, ChatGPT, Codex, or any assistant that can make web
+    requests. No API key, no account: their agent lands here, joins a
+    lobby, and plays.</div>
+    <pre id="agentprompt" style="margin-top:8px;max-height:170px">loading…</pre>
+    <button onclick="copyPrompt()" style="background:#1a2547;color:var(--ink);
+      border:1px solid var(--edge);border-radius:6px;padding:7px 12px;
+      font:inherit;cursor:pointer">copy invitation prompt</button>
+    <span class="sub" id="pcopied"></span></div>
   <div class="panel" style="grid-column:1/-1"><h2>Run your own manifold</h2>
     <div class="sub">Every Manifold instance carries its own source —
     same code, same UI, same protocol, no central server. One paste
@@ -195,6 +205,13 @@ if (REPO && !REPO.startsWith('__')) {{
 async function copySpin() {{
   await navigator.clipboard.writeText(document.getElementById('spinup').textContent);
   document.getElementById('spun').textContent = ' copied';
+}}
+fetch('/agent-prompt').then(r => r.text()).then(t => {{
+  document.getElementById('agentprompt').textContent = t;
+}});
+async function copyPrompt() {{
+  await navigator.clipboard.writeText(document.getElementById('agentprompt').textContent);
+  document.getElementById('pcopied').textContent = ' copied — text it to a friend';
 }}
 games(); boards(); peers(); suggs();
 lobbies(); setInterval(lobbies, 4000);

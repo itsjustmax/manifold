@@ -27,20 +27,37 @@ import urllib.request
 # leaderboard tracks a career, not a stranger per lobby.
 ROSTER = ["aster", "briar", "cove", "dune", "ember", "flint"]
 
-EXHIBITS = {
-    "convergence": {
-        "params": {"round_seconds": 30, "expected_players": 3},
-        "timeout": 30 * 8 + 120,      # worst case all 8 rounds + latency
-    },
-    "fogline": {
-        "params": {"tick_seconds": 45, "expected_players": 3},
-        "timeout": 45 * 6 + 120,
-    },
-    "prang": {
-        "params": {"match_seconds": 120, "expected_players": 4},
-        "timeout": 120 + 90,
-    },
-}
+def exhibit_for(game: str, minds: str | None) -> dict:
+    """Window sizes follow the mind: plan-billed CLIs (claude-code,
+    codex) think in tens of seconds, so turn windows widen for them."""
+    cli = bool(minds) and not minds.startswith("anthropic:")
+    if game == "convergence":
+        rs = 75 if cli else 30
+        return {"params": {"round_seconds": rs, "expected_players": 3},
+                "timeout": rs * 8 + 120}
+    if game == "fogline":
+        ts = 90 if cli else 45
+        return {"params": {"tick_seconds": ts, "expected_players": 3},
+                "timeout": ts * 6 + 120}
+    return {"params": {"match_seconds": 120, "expected_players": 4},
+            "timeout": 120 + 90}
+
+
+def preflight_cli(spec: str) -> None:
+    """Plan-billed mind: verify the CLI exists and answers before
+    seating it. No key involved anywhere."""
+    import shutil
+    binary = "claude" if spec.startswith("claude-code") else "codex"
+    if shutil.which(binary) is None:
+        sys.exit(f"[flagship] '{binary}' CLI not found — install it and "
+                 "log in (plan-billed, no API key), or use mock minds")
+    out = subprocess.run([binary] + (["-p"] if binary == "claude" else ["exec"]),
+                         input="Reply with exactly: OK",
+                         capture_output=True, text=True, timeout=120)
+    if out.returncode != 0 or "OK" not in out.stdout:
+        sys.exit(f"[flagship] {binary} preflight failed: "
+                 f"{(out.stderr or out.stdout)[:200]}")
+    print(f"[flagship] {spec} preflight ok — plan-billed, no API key")
 
 
 def preflight_anthropic(model: str) -> None:
@@ -68,24 +85,23 @@ def preflight_anthropic(model: str) -> None:
     print(f"[flagship] anthropic preflight ok: {model} answers")
 
 
-def seats_for(game: str, anthropic: str | None) -> list[tuple[str, float | None]]:
-    """(decider, hz) per seat. With real minds, prang seats them beside
-    scripted strikers — a fixed baseline is how improvement becomes
-    measurable, and an API mind at 60Hz is neither possible nor the
-    point: it plays through longer committed programs at ~0.5Hz."""
-    a = f"anthropic:{anthropic}" if anthropic else None
+def seats_for(game: str, minds: str | None) -> list[tuple[str, float | None]]:
+    """(decider, hz) per seat. Real minds take the turn games; in
+    prang, only API minds (sub-second-capable at 0.5Hz through
+    committed programs) get seats — a CLI mind thinks in tens of
+    seconds and realtime will not wait for it. Seat parity is team
+    assignment (even=west, odd=east), so [m, s, m, s] means west = the
+    reasoning minds vs east = the tuned scripted strikers: a fixed
+    baseline the minds must learn to beat."""
     if game == "convergence":
-        return [(a or "mock:converge", None)] * 3
+        return [(minds or "mock:converge", None)] * 3
     if game == "fogline":
-        return ([(a, None)] * 3 if a else
+        return ([(minds, None)] * 3 if minds else
                 [("mock:fogline-brash", None), ("mock:fogline-measured", None),
                  ("mock:hold", None)])
-    # prang: seat parity is team assignment (even=west, odd=east), so
-    # [a, s, a, s] means west = the reasoning minds, east = the tuned
-    # scripted strikers: a fixed baseline the LLM team must learn to beat
-    if a:
-        return [(a, 0.5), ("mock:prang-striker", 3),
-                (a, 0.5), ("mock:prang-striker", 3)]
+    if minds and minds.startswith("anthropic:"):
+        return [(minds, 0.5), ("mock:prang-striker", 3),
+                (minds, 0.5), ("mock:prang-striker", 3)]
     return [("mock:prang-striker", 3)] * 4
 
 
@@ -100,7 +116,7 @@ def http(method: str, url: str, body: dict | None = None) -> dict:
 
 
 def run_match(server: str, game: str, spec: dict, env: dict,
-              anthropic: str | None) -> None:
+              minds: str | None) -> None:
     code = http("POST", f"{server}/games/{game}/lobbies",
                 {"params": spec["params"]})["code"]
     print(f"[flagship] {game} {code} — curtain up "
@@ -108,7 +124,7 @@ def run_match(server: str, game: str, spec: dict, env: dict,
     logdir = os.path.join(env["MANIFOLD_HOME"], "logs")
     os.makedirs(logdir, exist_ok=True)
     pilots = []
-    for i, (decider, hz) in enumerate(seats_for(game, anthropic)):
+    for i, (decider, hz) in enumerate(seats_for(game, minds)):
         name = ROSTER[i]
         subprocess.run([sys.executable, "-m", "manifold_cli", "join",
                         server, game, "--code", code, "--name", name],
@@ -152,19 +168,29 @@ def main() -> int:
     ap.add_argument("--cycles", type=int, default=0,
                     help="stop after N matches (0 = run forever)")
     ap.add_argument("--games", default="convergence,prang,fogline")
+    ap.add_argument("--minds", metavar="DECIDER",
+                    help="house minds for turn games: claude-code[:model] "
+                         "or codex[:model] (plan-billed, NO API key), or "
+                         "anthropic:<model> (raw API, needs credits)")
     ap.add_argument("--anthropic", metavar="MODEL",
-                    help="seat anthropic:<MODEL> house minds instead of "
-                         "mocks — burns YOUR api credits every match")
+                    help="shorthand for --minds anthropic:<MODEL>")
     a = ap.parse_args()
 
     server = a.server.rstrip("/")
-    games = [g.strip() for g in a.games.split(",") if g.strip() in EXHIBITS]
+    known = ("convergence", "prang", "fogline")
+    games = [g.strip() for g in a.games.split(",") if g.strip() in known]
     if not games:
-        sys.exit(f"no known games in --games; choose from {list(EXHIBITS)}")
-    if a.anthropic:
-        preflight_anthropic(a.anthropic)
-        print(f"[flagship] house minds: anthropic:{a.anthropic} — this "
-              "spends real credits continuously; Ctrl-C is the off switch")
+        sys.exit(f"no known games in --games; choose from {list(known)}")
+    minds = a.minds or (f"anthropic:{a.anthropic}" if a.anthropic else None)
+    if minds and minds.startswith("anthropic:"):
+        preflight_anthropic(minds.split(":", 1)[1])
+        print(f"[flagship] house minds: {minds} — this spends API credits "
+              "continuously; Ctrl-C is the off switch")
+    elif minds:
+        preflight_cli(minds)
+        print(f"[flagship] house minds: {minds} — billed to that CLI's "
+              "plan; realtime prang keeps scripted strikers (a CLI mind "
+              "thinks in tens of seconds)")
     env = {**os.environ,
            "MANIFOLD_HOME": os.environ.get(
                "FLAGSHIP_HOME", os.path.expanduser("~/.manifold-flagship"))}
@@ -173,7 +199,7 @@ def main() -> int:
     while True:
         game = games[n % len(games)]
         try:
-            run_match(server, game, EXHIBITS[game], env, a.anthropic)
+            run_match(server, game, exhibit_for(game, minds), env, minds)
         except Exception as e:
             print(f"[flagship] {game} skipped: {e}")
         n += 1

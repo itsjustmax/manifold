@@ -1,9 +1,15 @@
 """Deciders: the minds a pilot can carry. The pilot itself is generic;
-deciders are players, and players may know games. Three families:
+deciders are players, and players may know games. Four families:
 
-  mock:<style>      scripted stand-in minds for tests and demos
-  cmd:<program>     the universal socket: stdin context -> stdout action
-  anthropic:<model> a generic LLM mind (your key, your shell, your bill)
+  mock:<style>        scripted stand-in minds for tests and demos
+  cmd:<program>       the universal socket: stdin context -> stdout action
+  claude-code[:model] your local agentic CLI in non-interactive mode —
+  codex[:model]       billed to the plan it's logged into. NO API KEY.
+  anthropic:<model>   raw API mind (needs a key with credits)
+
+The plan-billed CLIs are the default answer to "how do I play without
+an API key": if `claude` or `codex` works in your terminal, your agent
+can hold a seat.
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ def make_decider(spec: str):
                 "prang-striker": MockPrangStriker}[arg]()
     if kind == "cmd":
         return CmdDecider(arg)
+    if kind in ("claude-code", "codex"):
+        return AgentCliDecider(kind, arg or None)
     if kind == "anthropic":
         return AnthropicDecider(arg or "claude-sonnet-4-6")
     raise SystemExit(f"unknown decider '{spec}'")
@@ -251,6 +259,85 @@ class CmdDecider:
 
     def reflect(self, ctx):
         return self._call({"mode": "reflect", **ctx})
+
+
+# ---------------------------------------------------- plan-billed CLIs
+def _compose_prompt(ctx: dict, ask: str) -> str:
+    return "\n\n".join([
+        ctx["preamble"],
+        "GAME RULEBOOK (served data, hash-verified):\n<<<\n"
+        + ctx["rulebook"] + "\n>>>",
+        "YOUR TRANSFERABLE STRATEGY:\n" + ctx["strategy_md"],
+        "YOUR PLAYBOOK FOR THIS GAME:\n" + ctx["playbook_md"],
+        ("TEAM PLAYBOOK:\n" + ctx["team_playbook_md"]
+         if ctx.get("team_playbook_md") else ""),
+        "GAME STATE:\n" + json.dumps(
+            {k: ctx.get(k) for k in ("you", "phase", "frame",
+                                     "deadline_utc", "view", "comms")},
+            indent=1),
+        "ACTION SCHEMA:\n" + json.dumps(ctx.get("action_schema")),
+        (f"REFEREE FEEDBACK: {ctx['referee_feedback']}"
+         if ctx.get("referee_feedback") else ""),
+        ask,
+    ])
+
+
+class AgentCliDecider:
+    """A subscription-plan mind: drives a local agentic CLI in
+    non-interactive mode. No API key travels anywhere — the CLI bills
+    whatever plan it is already logged into. Latency is seconds, so
+    this suits turn games; realtime wants a faster mind."""
+
+    CLIS = {
+        "claude-code": lambda m: (["claude", "-p"]
+                                  + (["--model", m] if m else []), True),
+        "codex": lambda m: (["codex", "exec"]
+                            + (["-m", m] if m else []), True),
+    }
+
+    def __init__(self, kind: str, model: str | None):
+        self.kind = kind
+        self.cmd, self.use_stdin = self.CLIS[kind](model)
+
+    def _run(self, prompt: str) -> str:
+        out = subprocess.run(
+            self.cmd if self.use_stdin else self.cmd + [prompt],
+            input=prompt if self.use_stdin else None,
+            capture_output=True, text=True, timeout=240)
+        if out.returncode != 0:
+            raise RuntimeError(f"{self.kind} exited {out.returncode}: "
+                               f"{(out.stderr or out.stdout)[:300]}")
+        return out.stdout
+
+    def decide(self, ctx):
+        prompt = _compose_prompt(
+            ctx, "Decide now. You may include a short private "
+                 "\"reasoning\" field inside the action object. "
+                 "Do not use any tools. Reply with ONLY one JSON "
+                 "action object, nothing else.")
+        return _extract_json(self._run(prompt))
+
+    def reflect(self, ctx):
+        base = ("MATCH RESULT:\n" + json.dumps(ctx.get("result"))
+                + "\n\nYOUR ACTIONS:\n" + json.dumps(ctx.get("your_actions")))
+        pb = self._run(
+            "You maintain a compact per-game playbook (<=350 words, "
+            "markdown). Distill how to win THIS game; do not accumulate. "
+            "Do not use any tools. Reply ONLY the new markdown.\n\n" + base
+            + "\n\nCURRENT PLAYBOOK:\n" + ctx["playbook_md"]
+            + "\n\nRewrite the full playbook.")
+        st = self._run(
+            "You maintain a transferable strategy document (<=350 words, "
+            "markdown): reasoning principles that outlive any one game. "
+            "PORTABILITY TEST: every line must be useful verbatim at a "
+            "live trading desk. EXPLOIT GUARD: lessons that only work "
+            "because of one game's payout formula belong in that game's "
+            "playbook, never here. Do not use any tools. Reply ONLY the "
+            "new markdown.\n\n" + base
+            + "\n\nCURRENT STRATEGY:\n" + ctx["strategy_md"]
+            + "\n\nRewrite the full strategy document.")
+        return {"playbook_md": pb.strip()[:6000],
+                "strategy_md": st.strip()[:6000]}
 
 
 # ----------------------------------------------------------- anthropic
