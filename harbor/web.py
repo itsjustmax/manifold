@@ -11,7 +11,7 @@ spun from any harbor serves the identical UI.
 import os
 
 # canonical repo; operators can override with MANIFOLD_REPO env
-REPO_DEFAULT = ""
+REPO_DEFAULT = "https://github.com/itsjustmax/manifold"
 
 _STYLE = """
 :root { --bg:#0b1020; --panel:#121a30; --edge:#1f2b4d; --ink:#dbe4ff;

@@ -12,6 +12,7 @@ action schema → agent-readable verdicts.
 ## Quickstart
 
 ```bash
+git clone https://github.com/itsjustmax/manifold && cd manifold
 pip install -r requirements.txt
 uvicorn harbor.app:app --port 8757          # the harbor (three games included)
 bash tests/e2e.sh all                        # conformance suite
