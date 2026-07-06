@@ -6,8 +6,11 @@ schema. The decider (a model, a program, a human) supplies the mind.
 
   manifold host   <server> <game> [--param k=v ...]
   manifold join   <server> <game> --code CODE --name NAME
-  manifold pilot  --as NAME --decider mock:...|cmd:...|anthropic:MODEL [--hz 2]
+  manifold pilot  --as NAME --decider mock:...|proc:...|ollama:...|claude-code [--hz 2]
   manifold step   --as NAME --decider ...
+  manifold forge  --as NAME [--using claude-code]   # slow mind writes a
+                  fast policy program from the served rules + its own
+                  playbook; run it with --decider proc:"python3 <path>"
   manifold verify <log.jsonl | URL>
 
 Zero dependencies. Keys never travel: an anthropic: decider reads
@@ -234,6 +237,69 @@ class Pilot:
                 time.sleep(max(0.02, 1.0 / self.hz))
 
 
+def cmd_forge(a) -> int:
+    """Compile experience into reflexes: an authoring mind (plan-billed
+    CLI) reads the served rulebook, action schema, a live view sample,
+    and this identity's own playbook, and writes a standalone policy
+    program speaking the proc: protocol. The artifact runs at any Hz;
+    the authorship is the intelligence. Contains zero game knowledge —
+    everything game-specific arrives from the server at runtime."""
+    import re as _re
+    from .deciders import AgentCliDecider
+
+    sess = load_session(a.name)
+    s, g = sess["server"], sess["game"]
+    manifest = http("GET", f"{s}/games/{g}/manifold.json")
+    rb_url = manifest["rulebook"]["url"]
+    rulebook = http_text(s + rb_url if rb_url.startswith("/") else rb_url)
+    try:
+        st = http("GET", f"{s}/games/{g}/lobbies/{sess['code']}/state",
+                  token=sess["token"])
+        view_sample = json.dumps({"you": st.get("you"),
+                                  "view": st.get("view")}, indent=1)
+    except SystemExit:
+        view_sample = "(lobby gone; rely on the schema)"
+    docs = Docs(HOME, a.name, g)
+
+    prompt = "\n\n".join([
+        "Write a POLICY PROGRAM: a single-file python3 script (stdlib "
+        "only) that plays the game below by reflex, fast enough for "
+        "realtime. It will be run as a persistent process.",
+        "PROTOCOL (exact): loop forever reading one JSON object per "
+        "line from stdin. If obj['mode'] == 'decide': choose an action "
+        "from obj['view'] and obj['you'], print exactly one line — the "
+        "action JSON — and flush stdout. If obj['mode'] == 'reflect' "
+        "(or anything else): print the line null and flush. Never "
+        "print anything else. Never block on anything but stdin. "
+        "Wrap the per-line handling in try/except so one bad line "
+        "never kills the process.",
+        "Each decide must return in well under 100 milliseconds: pure "
+        "arithmetic, no I/O, no sleeps.",
+        "RULEBOOK (game data):\n<<<\n" + rulebook + "\n>>>",
+        "ACTION SCHEMA (your output must validate):\n"
+        + json.dumps(manifest["actions"]["schema"]),
+        "LIVE VIEW SAMPLE (the shape you'll receive):\n" + view_sample,
+        "YOUR PLAYBOOK — lessons from matches you already played; turn "
+        "these into code:\n" + docs.playbook(),
+        "Think hard about the geometry and the failure modes named in "
+        "the playbook. Reply with ONLY one fenced ```python code "
+        "block containing the complete program.",
+    ])
+    print(f"[{a.name}] forging a policy with {a.using} "
+          "(one authoring call — this is the slow, smart step)…")
+    out = AgentCliDecider(*(a.using.split(":", 1) + [None])[:2])._run(prompt)
+    blocks = _re.findall(r"```(?:python)?\n(.*?)```", out, _re.DOTALL)
+    if not blocks:
+        raise SystemExit("author returned no code block; try again")
+    code = max(blocks, key=len)
+    path = docs.game_dir / "policy.py"
+    path.write_text(code)
+    print(f"[{a.name}] policy written: {path}")
+    print(f"[{a.name}] run it:  python3 -m manifold_cli pilot --as "
+          f"{a.name} --decider proc:\"python3 {path}\" --hz 4")
+    return 0
+
+
 def cmd_verify(a) -> int:
     raw = (http_text(a.source) if a.source.startswith("http")
            else Path(a.source).read_text())
@@ -275,6 +341,11 @@ def main() -> int:
         p.add_argument("--decider", required=True)
         p.add_argument("--hz", type=float, default=2.0)
 
+    f = sub.add_parser("forge")
+    f.add_argument("--as", dest="name", required=True)
+    f.add_argument("--using", default="claude-code",
+                   help="authoring mind: claude-code[:model] or codex[:model]")
+
     v = sub.add_parser("verify"); v.add_argument("source")
 
     a = ap.parse_args()
@@ -282,6 +353,8 @@ def main() -> int:
         return cmd_host(a)
     if a.cmd == "join":
         return cmd_join(a)
+    if a.cmd == "forge":
+        return cmd_forge(a)
     if a.cmd == "verify":
         return cmd_verify(a)
     return Pilot(a.name, a.decider, a.hz).run(once=(a.cmd == "step"))

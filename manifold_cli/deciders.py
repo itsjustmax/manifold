@@ -2,14 +2,20 @@
 deciders are players, and players may know games. Four families:
 
   mock:<style>        scripted stand-in minds for tests and demos
-  cmd:<program>       the universal socket: stdin context -> stdout action
+  cmd:<program>       one-shot socket: stdin context -> stdout action
+  proc:<program>      PERSISTENT socket for fast minds: spawned once,
+                      one JSON line per request on stdin, one JSON
+                      line per action on stdout. No spawn cost per
+                      decision — this is the 4Hz-capable plug.
+  ollama:<model>      local model via the Ollama server (no key, no
+                      cloud, latency = your own silicon)
   claude-code[:model] your local agentic CLI in non-interactive mode —
   codex[:model]       billed to the plan it's logged into. NO API KEY.
   anthropic:<model>   raw API mind (needs a key with credits)
 
-The plan-billed CLIs are the default answer to "how do I play without
-an API key": if `claude` or `codex` works in your terminal, your agent
-can hold a seat.
+The speed hierarchy is physics: cloud minds think in seconds (turn
+games), local minds in milliseconds (realtime). A slow mind can still
+own a fast seat by AUTHORING a proc: program — see `manifold forge`.
 """
 
 from __future__ import annotations
@@ -30,6 +36,10 @@ def make_decider(spec: str):
                 "prang-striker": MockPrangStriker}[arg]()
     if kind == "cmd":
         return CmdDecider(arg)
+    if kind == "proc":
+        return ProcDecider(arg)
+    if kind == "ollama":
+        return OllamaDecider(arg or "llama3.2:1b")
     if kind in ("claude-code", "codex"):
         return AgentCliDecider(kind, arg or None)
     if kind == "anthropic":
@@ -259,6 +269,93 @@ class CmdDecider:
 
     def reflect(self, ctx):
         return self._call({"mode": "reflect", **ctx})
+
+
+# ------------------------------------------------------------ fast minds
+class ProcDecider:
+    """Persistent subprocess, JSON-lines protocol. Request per line:
+    {"mode":"decide"|"reflect", ...context}; response per line: one
+    action object (or null). The program lives for the whole match, so
+    per-decision cost is pure think time — the realtime-capable plug.
+    A crashed program is restarted once per call."""
+
+    def __init__(self, program: str):
+        self.program = program
+        self.proc: subprocess.Popen | None = None
+
+    def _ensure(self):
+        if self.proc is None or self.proc.poll() is not None:
+            self.proc = subprocess.Popen(
+                self.program, shell=True, text=True, bufsize=1,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    def _call(self, payload: dict):
+        self._ensure()
+        try:
+            self.proc.stdin.write(json.dumps(payload) + "\n")
+            self.proc.stdin.flush()
+            line = self.proc.stdout.readline()
+        except (BrokenPipeError, OSError) as e:
+            self.proc = None
+            raise RuntimeError(f"policy process died: {e}")
+        if not line:
+            self.proc = None
+            raise RuntimeError("policy process closed stdout")
+        line = line.strip()
+        return json.loads(line) if line and line != "null" else None
+
+    def decide(self, ctx):
+        return self._call({"mode": "decide", **ctx})
+
+    def reflect(self, ctx):
+        try:
+            return self._call({"mode": "reflect", **ctx})
+        except (RuntimeError, json.JSONDecodeError):
+            return None
+
+
+class OllamaDecider:
+    """A local model on your own silicon (ollama serve). The stable
+    context (preamble, rulebook, playbook) rides the system prompt so
+    Ollama's prefix cache pays it once; per decision only the fresh
+    view is prefilled. format=json constrains small models to legal
+    output."""
+
+    URL = "http://127.0.0.1:11434/api/chat"
+
+    def __init__(self, model: str):
+        import urllib.request  # stdlib only, like the whole pilot
+        self.model = model
+        self._system: str | None = None
+
+    def _post(self, body: dict) -> dict:
+        import urllib.request
+        req = urllib.request.Request(
+            self.URL, data=json.dumps(body).encode(), method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read().decode())
+
+    def decide(self, ctx):
+        if self._system is None:
+            self._system = "\n\n".join([
+                ctx["preamble"],
+                "RULEBOOK (game data):\n" + ctx["rulebook"],
+                "YOUR PLAYBOOK:\n" + ctx["playbook_md"],
+                "ACTION SCHEMA:\n" + json.dumps(ctx.get("action_schema")),
+                "Every reply: exactly one JSON action object, no prose."])
+        user = json.dumps({k: ctx.get(k) for k in
+                           ("you", "view", "comms", "referee_feedback")})
+        out = self._post({
+            "model": self.model, "stream": False, "format": "json",
+            "keep_alive": "30m",
+            "options": {"temperature": 0.2, "num_predict": 120},
+            "messages": [{"role": "system", "content": self._system},
+                         {"role": "user", "content": user}]})
+        return json.loads(out["message"]["content"])
+
+    def reflect(self, ctx):
+        return None     # a 1B model's reflections aren't worth the disk
 
 
 # ---------------------------------------------------- plan-billed CLIs
