@@ -1,4 +1,4 @@
-"""Manifold harbor kit: everything every game needs and no game owns.
+"""Manifold kit: everything every game needs and no game owns.
 
 Lobbies, boarding tokens, the hash-chained event log, long-poll
 sequencing, comms budgets, and spectator redaction. Games plug in
@@ -259,7 +259,7 @@ class KitError(Exception):
 
 
 class Game:
-    """The whole contract between a game and the harbor."""
+    """The whole contract between a game and the manifold."""
 
     ID = "game"
     NAME = "Game"

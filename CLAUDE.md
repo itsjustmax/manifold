@@ -16,7 +16,7 @@ Any change that violates one of these is wrong even if it works:
 1. **The referee is code.** No LLM judgment anywhere in scoring,
    resolution, or money movement. LLMs may author content (future
    Gamemaster milestone) but a deterministic referee executes it.
-2. **Keys never travel.** The harbor holds no inference credentials and
+2. **Keys never travel.** The manifold holds no inference credentials and
    never proxies model calls. Players bring minds through their own
    harnesses (`manifold_cli/deciders.py` is where minds plug in).
 3. **A game may define a game, never redefine your agent.** The pilot
@@ -37,17 +37,17 @@ Any change that violates one of these is wrong even if it works:
 ```
 PROTOCOL.md            the law: manifest, endpoints, envelopes, timing, records
 SPEC.md                v1 scope, deliberate cuts, conformance definitions
-harbor/kit.py          lobbies, tokens, hash-chained events, long-poll, comms budgets
-harbor/app.py          FastAPI wiring, game registry, careers.json, match persistence,
+manifold/kit.py          lobbies, tokens, hash-chained events, long-poll, comms budgets
+manifold/app.py          FastAPI wiring, game registry, careers.json, match persistence,
                        discovery (/lobbies), leaderboards, /suggestions, /peers
-harbor/web.py          human dashboard (/) + spectator page (/watch/{g}/{code});
+manifold/web.py          human dashboard (/) + spectator page (/watch/{g}/{code});
                        non-normative — reads only public JSON + watch.json broadcast
-harbor/serve.py        one-command public harbor: uvicorn + a DEDICATED ngrok
+manifold/serve.py        one-command public manifold: uvicorn + a DEDICATED ngrok
                        agent (own :4757 API, never another tool's agent) + banner
-harbor/mesh.py         gossip directory of harbors: pinned peers.json + announce
+manifold/mesh.py         gossip directory of manifolds: pinned peers.json + announce
                        + probe-before-share + prune; directory only, careers stay
                        local until signatures (T7 covers it)
-harbor/games/
+manifold/games/
   convergence.py       hello-world canary (~150 lines) — copy this to write a new game
   fogline_game.py      staking/calibration game over vendored fogline_core/
   fogline_core/        v0-proven scoring + sealed-package modules; treat as stable
@@ -65,7 +65,7 @@ HOSTING.md             ngrok runbook, peers.json phonebook, exposure caps
 
 ```bash
 pip install -r requirements.txt            # fastapi, uvicorn (pilot is stdlib-only)
-uvicorn harbor.app:app --port 8757         # run the harbor
+uvicorn manifold.app:app --port 8757         # run the manifold
 bash tests/e2e.sh all                      # T1-T5; must pass before any commit
 bash tests/e2e.sh t3                       # prang + replay + pilot-generality only
 
@@ -74,33 +74,33 @@ python3 -m manifold_cli host  http://localhost:8757 fogline --param tick_seconds
 python3 -m manifold_cli join  http://localhost:8757 fogline --code GALE-7 --name kestrel
 python3 -m manifold_cli pilot --as kestrel --decider anthropic:claude-sonnet-4-6
 python3 -m manifold_cli verify <log.jsonl | URL>          # hash chain
-python3 -m harbor.games.prang --verify <log.jsonl>        # physics replay
+python3 -m manifold.games.prang --verify <log.jsonl>        # physics replay
 ```
 
 Env: `MANIFOLD_HOME` (pilot sessions + documents, default `~/.manifold`),
-`HARBOR_DATA` (careers + match logs, default `./harbor_data`),
+`MANIFOLD_DATA` (careers + match logs, default `./manifold_data`),
 `ANTHROPIC_API_KEY` (only read by the anthropic decider, client-side).
 
 ## Hosting on this system
 
-The harbor is one asyncio process; the proven pattern here is uvicorn
+The manifold is one asyncio process; the proven pattern here is uvicorn
 behind ngrok (same as the proxy-research tool):
 
 ```bash
-uvicorn harbor.app:app --host 127.0.0.1 --port 8757   # tmux/launchd
+uvicorn manifold.app:app --host 127.0.0.1 --port 8757   # tmux/launchd
 ngrok http 8757
 ```
 
 Friends' agents then need exactly a URL + lobby code. Spectators hit
 `GET …/state` and `GET …/log` with no token. Note `assign_team` is
-seat-parity for prang, so brief joiners to alternate. The harbor is
+seat-parity for prang, so brief joiners to alternate. The manifold is
 trusted in v1: the operator's process can see sealed state before
 reveal. Federation + signatures (below) is what removes that trust.
 
 ## Testing rules
 
 - `tests/e2e.sh all` green before and after every change. It boots a
-  throwaway harbor on port 8899 with temp dirs; safe to run anywhere.
+  throwaway manifold on port 8899 with temp dirs; safe to run anywhere.
 - T2's money assertion is exact-to-the-cent; if you touch fogline
   economics, reconcile `net` vs `bankroll` rather than loosening it.
 - T3's replay assertion is bit-exact digest equality. If you touch
@@ -131,7 +131,7 @@ reveal. Federation + signatures (below) is what removes that trust.
    resolution timing). Accept: a false claim provably costs its escrow
    at reveal; a true one pays; chain records both.
 4. **Signatures + federation (v1.5)** — Ed25519 keypair per identity,
-   `sig` on action envelopes, cross-harbor careers. Removes the trusted
+   `sig` on action envelopes, cross-manifold careers. Removes the trusted
    operator. Accept: a tampered server log is detectable by any player
    from their own signed action set.
 5. **Seasonal scoring mutation** — scoring constants versioned per

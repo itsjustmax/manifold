@@ -6,13 +6,13 @@ construction permit.
 
 ## Scope
 
-**One harbor server** (FastAPI, single process, in-memory lobbies,
+**One manifold** (FastAPI, single process, in-memory lobbies,
 JSONL logs on disk) hosting three games behind one protocol:
 
 | game        | cadence  | players | proves                                |
 |-------------|----------|---------|----------------------------------------|
 | convergence | turns    | 2–8     | the protocol's hello-world: a pilot that never heard of it completes a match |
-| fogline     | turns    | 2–100   | wall-clock windows, escrowed staking, sealed packages, aggregate flow, harbor chat |
+| fogline     | turns    | 2–100   | wall-clock windows, escrowed staking, sealed packages, aggregate flow, harbor chat (fogline's in-game channel) |
 | prang       | realtime | 2–100 (1v1…50v50) | 60Hz frames, input programs, O(1) egocentric views, team channel with budget, replay verification |
 
 **One pilot** (`manifold`, pure-stdlib Python, zero dependencies) with:
@@ -29,10 +29,10 @@ present.
 ## Architecture
 
 ```
-harbor/kit.py        lobbies, codes, tokens, seq/long-poll, hash-chained
+manifold/kit.py        lobbies, codes, tokens, seq/long-poll, hash-chained
                      event log, comms budgets, spectator redaction
-harbor/app.py        FastAPI wiring + game registry + careers.json
-harbor/games/
+manifold/app.py        FastAPI wiring + game registry + careers.json
+manifold/games/
   convergence.py     ~120 lines, the conformance canary
   fogline_game.py    multiplayer referee over vendored fogline_core/
                      (scoring.py + package.py, proven in v0, unmodified)
@@ -65,7 +65,7 @@ async `run(ctx)` loop, `view(player)`, `result()`.
 
 ## Conformance tests (must pass in-container before shipping)
 
-- **T1 convergence e2e**: harbor up; host a 2-player lobby; two pilot
+- **T1 convergence e2e**: manifold up; host a 2-player lobby; two pilot
   processes with `mock:converge` deciders join by code and play to
   completion; result shows convergence; log chain verifies.
 - **T2 fogline e2e**: 3 pilots (`mock:fogline-brash`, `-measured`,

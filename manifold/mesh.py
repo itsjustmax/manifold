@@ -1,16 +1,16 @@
-"""Mesh v0: a gossiped directory of harbors.
+"""Mesh v0: a gossiped directory of manifolds.
 
 Not a ledger, on purpose. A globally consistent list of all hosts is a
 consensus problem nobody here needs to pay for; what an agent needs is
-"the harbor I'm on knows other live harbors." So: each harbor keeps a
+"the manifold I'm on knows other live manifolds." So: each manifold keeps a
 directory, periodically pulls its peers' directories, and — the rule
-that keeps the mesh honest — VERIFIES A HARBOR IS ALIVE ITSELF before
+that keeps the mesh honest — VERIFIES A MANIFOLD IS ALIVE ITSELF before
 ever re-sharing it. Dead tunnels age out; hearsay is probed before it
 propagates; pinned peers (the operator's own peers.json) are vouched
 and never pruned.
 
-Directory only: careers do NOT merge across harbors here. That needs
-the signature layer, or cross-harbor reputation is farmable.
+Directory only: careers do NOT merge across manifolds here. That needs
+the signature layer, or cross-manifold reputation is farmable.
 
 Env knobs: MANIFOLD_MESH_INTERVAL (seconds, default 300),
 MANIFOLD_MESH_ALLOW_LOCAL=1 (accept loopback/private peers — tests and
@@ -121,7 +121,7 @@ class Mesh:
             return None
 
     def _self_url(self) -> str | None:
-        """Our current public address, as written by harbor.serve.
+        """Our current public address, as written by manifold.serve.
         Ephemeral by design — tunnels rotate; the mesh tracks it."""
         p = self.data / "public_url.txt"
         try:
@@ -130,7 +130,7 @@ class Mesh:
             return None
 
     def _probe(self, origin: str) -> dict | None:
-        """A live harbor answers /healthz with ok + games + instance."""
+        """A live manifold answers /healthz with ok + games + instance."""
         d = self._get_json(f"{origin}/healthz")
         if not d or d.get("ok") is not True or "games" not in d:
             return None
@@ -152,7 +152,7 @@ class Mesh:
             del self.known[origin]
 
     async def announce(self, url: str) -> tuple[bool, int, str]:
-        """A harbor knocked and asked to be listed. Verify before
+        """A manifold knocked and asked to be listed. Verify before
         trusting: (accepted, http_status, reason)."""
         origin = origin_of(url)
         if origin is None:
@@ -163,14 +163,14 @@ class Mesh:
         if origin in self.known:
             return True, 200, "already listed"
         if len(self.known) >= MAX_PEERS:
-            return False, 429, "mesh directory full on this harbor"
+            return False, 429, "mesh directory full on this manifold"
         health = await asyncio.to_thread(self._probe, origin)
         if health is None:
             return False, 400, (f"probed {origin}/healthz and got no live "
-                                "manifold harbor; announce only a reachable "
+                                "manifold; announce only a reachable "
                                 "public URL")
         if health.get("instance") == self.instance_id:
-            return False, 400, "that is this harbor's own address"
+            return False, 400, "that is this manifold's own address"
         self._note_alive(origin, health, source="announce")
         self._save()
         return True, 200, "verified alive and listed"
@@ -231,7 +231,7 @@ class Mesh:
             try:
                 await self.gossip_round()
             except Exception:
-                pass                     # a bad round never kills the harbor
+                pass                     # a bad round never kills the manifold
             await asyncio.sleep(self.interval)
 
     # ------------------------------------------------------------ output
@@ -251,7 +251,7 @@ class Mesh:
                         "games": e.get("games", [])})
         return {"peers": out, "mesh": "v0-gossip",
                 "note": ("directory only — careers do not transfer "
-                         "between harbors until the signature layer")}
+                         "between manifolds until the signature layer")}
 
 
 def _iso() -> str:

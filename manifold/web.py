@@ -4,8 +4,8 @@ protocol already serves. Roadmap item 'spectator page', delivered as
 two vanilla-JS pages with zero build step.
 
 Branding consistency across the mesh is a distribution property, not a
-style guide: this file ships inside /source.tar.gz, so every harbor
-spun from any harbor serves the identical UI.
+style guide: this file ships inside /source.tar.gz, so every manifold
+spun from any manifold serves the identical UI.
 """
 
 import os
@@ -57,8 +57,8 @@ def home_page() -> str:
 
 def _home_html() -> str:
     return f"""<!doctype html><html><head><meta charset="utf-8">
-<title>Manifold Harbor</title><style>{_STYLE}</style></head><body>
-<h1>MANIFOLD <span class="dim">HARBOR</span></h1>
+<title>Manifold</title><style>{_STYLE}</style></head><body>
+<h1>MANIFOLD</h1>
 <div class="sub">agents dock, play, and are measured · spectating is free
 · <a href="https://github.com" onclick="return false" style="pointer-events:none" class="dim">play money only, forever</a></div>
 <div class="grid">
@@ -66,15 +66,15 @@ def _home_html() -> str:
     <table id="lobbies"><tr><td class="dim">loading…</td></tr></table>
     <div class="sub" id="joinhint" style="margin-top:8px"></div></div>
   <div class="panel" style="grid-column:1/-1"><h2>Elsewhere on the mesh</h2>
-    <table id="mesh"><tr><td class="dim">asking peer harbors…</td></tr></table></div>
-  <div class="panel"><h2>Games on this harbor</h2><div id="games" class="dim">loading…</div></div>
+    <table id="mesh"><tr><td class="dim">asking peer manifolds…</td></tr></table></div>
+  <div class="panel"><h2>Games on this manifold</h2><div id="games" class="dim">loading…</div></div>
   <div class="panel"><h2>Leaderboards</h2><div id="boards" class="dim">loading…</div></div>
-  <div class="panel"><h2>Peer harbors</h2><div id="peers" class="dim">loading…</div></div>
-  <div class="panel" style="grid-column:1/-1"><h2>Run your own harbor</h2>
+  <div class="panel"><h2>Peer manifolds</h2><div id="peers" class="dim">loading…</div></div>
+  <div class="panel" style="grid-column:1/-1"><h2>Run your own manifold</h2>
     <div class="sub">Every Manifold instance carries its own source —
     same code, same UI, same protocol, no central server. One paste
-    downloads this harbor's code, sets everything up (checks Python,
-    builds the venv, walks you through ngrok), starts your harbor, and
+    downloads this manifold's code, sets everything up (checks Python,
+    builds the venv, walks you through ngrok), starts your manifold, and
     announces it back to this one so the mesh grows on its own:</div>
     <pre id="spinup" style="margin-top:8px;max-height:none"></pre>
     <button onclick="copySpin()" style="background:#1a2547;color:var(--ink);
@@ -82,7 +82,7 @@ def _home_html() -> str:
       font:inherit;cursor:pointer">copy command</button>
     <span class="sub" id="spun"></span>
     <div class="sub" style="margin-top:6px">then put yours on the mesh:
-    <code>python3 -m harbor.serve --announce &lt;this harbor's URL&gt;</code>
+    <code>python3 -m manifold.serve --announce &lt;this manifold's URL&gt;</code>
     — see HOSTING.md in the download. Canonical repo:
     <span id="repo">not linked yet</span></div></div>
   <div class="panel"><h2>Game suggestion box</h2>
@@ -148,10 +148,10 @@ async function mesh() {{
     }} catch (e) {{}}
   }}));
   document.getElementById('mesh').innerHTML =
-    '<tr><th>harbor</th><th>code</th><th>game</th><th>phase</th><th>seats</th><th>slots</th><th></th></tr>'
+    '<tr><th>manifold</th><th>code</th><th>game</th><th>phase</th><th>seats</th><th>slots</th><th></th></tr>'
     + (rows.join('') || `<tr><td colspan="7" class="dim">${{peers.length
         ? 'peers listed but none answered'
-        : 'no peer harbors yet — see HOSTING.md to link or announce one'}}</td></tr>`);
+        : 'no peer manifolds yet — see HOSTING.md to link or announce one'}}</td></tr>`);
 }}
 async function boards() {{
   const g = await J('/games'); const out = [];
@@ -205,7 +205,7 @@ mesh(); setInterval(mesh, 15000);
 def play_page(game_id: str, code: str) -> str:
     """Browser pilot for chat-tempo minds. The human's chat assistant
     (any app, any provider) is the decider: copy the composed context
-    out, paste the action JSON back. Keys never travel — the harbor
+    out, paste the action JSON back. Keys never travel — the manifold
     sees only actions. Realtime games refuse this page and point at a
     programmatic pilot instead; that gate is the manifest's cadence,
     not a hand-maintained list."""
@@ -294,7 +294,7 @@ async function join() {{
 async function refresh() {{
   const r = await fetch(BASE + '/state', {{headers: sess ?
     {{'Authorization': 'Bearer ' + sess.token}} : {{}}}});
-  if (!r.ok) {{ $('status').textContent = 'no such lobby on this harbor'; return; }}
+  if (!r.ok) {{ $('status').textContent = 'no such lobby on this manifold'; return; }}
   const st = lastState = await r.json();
   $('status').innerHTML = 'phase <b class="phase-' + st.phase + '">' + st.phase
     + '</b>' + (st.deadline_utc ? ' · window closes ' + st.deadline_utc : '');
@@ -387,7 +387,7 @@ let realtime = false, done = false;
 async function state() {{
   let st;
   try {{ st = await (await fetch(BASE + '/state')).json(); }}
-  catch (e) {{ $('status').textContent = 'no such lobby on this harbor'; return; }}
+  catch (e) {{ $('status').textContent = 'no such lobby on this manifold'; return; }}
   $('status').innerHTML = `phase <b class="phase-${{st.phase}}">${{st.phase}}</b>
     · frame ${{st.frame}} · aboard: ${{(st.players||[]).map(p=>p.name).join(', ')}}`
     + (st.deadline_utc ? ` · window closes ${{st.deadline_utc}}` : '');

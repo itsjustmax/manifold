@@ -4,7 +4,7 @@
     {
       "name": "harbor",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "uvicorn", "harbor.app:app", "--port", "8757"],
+      "runtimeArgs": ["-m", "uvicorn", "manifold.app:app", "--port", "8757"],
       "port": 8757
     }
   ]

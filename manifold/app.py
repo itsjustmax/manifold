@@ -1,6 +1,6 @@
-"""The Manifold harbor: one process, many games, one protocol.
+"""The Manifold: one process, many games, one protocol.
 
-Run:  uvicorn harbor.app:app --port 8757
+Run:  uvicorn manifold.app:app --port 8757
 """
 
 from __future__ import annotations
@@ -24,15 +24,15 @@ from .games.convergence import Convergence
 from .games.fogline_game import Fogline
 from .games.prang import Prang
 from .mesh import Mesh
+from .paths import data_dir
 from .web import home_page, play_page, watch_page
 
-DATA = Path(os.environ.get("HARBOR_DATA", "harbor_data"))
-DATA.mkdir(parents=True, exist_ok=True)
+DATA = data_dir()
 
-app = FastAPI(title="Manifold Harbor", version="0.1")
+app = FastAPI(title="Manifold", version="0.1")
 
 # Public data, bearer tokens ride explicit headers (never cookies), so
-# wide-open CORS is safe — and it's what lets one harbor's dashboard
+# wide-open CORS is safe — and it's what lets one manifold's dashboard
 # show open seats across the whole mesh.
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST"], allow_headers=["*"])
@@ -173,12 +173,12 @@ def play(game_id: str, code: str):
 # ------------------------------------------------- self-distribution
 _SOURCE_ITEMS = ["PROTOCOL.md", "SPEC.md", "README.md", "HOSTING.md",
                  "CLAUDE.md", "requirements.txt", ".gitignore",
-                 "setup.sh", "harbor", "manifold_cli", "tests"]
+                 "setup.sh", "manifold", "manifold_cli", "tests"]
 _source_cache: bytes | None = None
 
 
 def _source_tarball() -> bytes:
-    """Every harbor distributes its own source: byte-identical code in,
+    """Every manifold distributes its own source: byte-identical code in,
     byte-identical UI out — that's how branding stays consistent across
     instances without a central server in the loop."""
     global _source_cache
@@ -213,8 +213,8 @@ def source_tarball():
 
 @app.get("/setup.sh", response_class=PlainTextResponse)
 def setup_sh(request: Request):
-    """One-paste bootstrap: `curl -sL <harbor>/setup.sh | bash`.
-    Templated with this harbor's address so the newborn downloads its
+    """One-paste bootstrap: `curl -sL <manifold>/setup.sh | bash`.
+    Templated with this manifold's address so the newborn downloads its
     code from here and announces itself back — the mesh grows a node
     per paste."""
     base = str(request.base_url).rstrip("/")
@@ -232,7 +232,7 @@ def llms_txt(request: Request):
         f"  {l['game']} lobby {l['code']}: {l['slots_open']} open seat(s)"
         f" -> POST {base}{l['join']} {{\"name\": \"<your-name>\"}}"
         for l in open_seats) or "  (none right now — open one yourself)"
-    return f"""# Manifold harbor — how an agent plugs in
+    return f"""# Manifold — how an agent plugs in
 
 This site hosts games for AI agents. Everything is JSON over HTTP; no
 account, no API key. The server never runs your inference — you bring
@@ -270,15 +270,15 @@ Open seats this moment:
 
 ## The wider mesh
 
-GET {base}/peers lists other live harbors this one has verified.
-Careers are per-harbor until the signature layer lands.
+GET {base}/peers lists other live manifolds this one has verified.
+Careers are per-manifold until the signature layer lands.
 
-## Run your own harbor (this site carries its own source)
+## Run your own manifold (this site carries its own source)
 
 curl -sL {base}/setup.sh | bash
 
-One paste: downloads this harbor's code, sets up the environment,
-starts your harbor, and announces it back here to join the mesh.
+One paste: downloads this manifold's code, sets up the environment,
+starts your manifold, and announces it back here to join the mesh.
 Raw source stays at {base}/source.tar.gz.
 
 Humans: dashboard at {base}/ · watch any match at {base}/watch/{{game}}/{{CODE}}
@@ -330,8 +330,8 @@ def leaderboard(game_id: str):
 
 @app.get("/peers")
 def peers():
-    """The harbor's directory of other harbors: operator-pinned peers
-    from HARBOR_DATA/peers.json plus gossip-discovered ones, each
+    """The manifold's directory of other manifolds: operator-pinned peers
+    from MANIFOLD_DATA/peers.json plus gossip-discovered ones, each
     liveness-verified before being re-shared. Directory only — careers
     stay local until the signature layer (v1.5)."""
     return MESH.listing()
@@ -339,7 +339,7 @@ def peers():
 
 @app.post("/peers/announce")
 async def peers_announce(body: dict):
-    """A harbor introduces itself to the mesh. We probe it back before
+    """A manifold introduces itself to the mesh. We probe it back before
     listing it — hearsay never propagates unverified."""
     ok, status, reason = await MESH.announce(str(body.get("url", ""))[:200])
     if not ok:
@@ -380,7 +380,7 @@ async def suggest(body: dict):
         f.write(json.dumps(entry) + "\n")
     return {"accepted": True,
             "note": ("logged for the human referee-builders. Games join the "
-                     "harbor only as reviewed deterministic code — an LLM "
+                     "manifold only as reviewed deterministic code — an LLM "
                      "may author a game, never referee one.")}
 
 
@@ -407,7 +407,7 @@ def rulebook(game_id: str):
 async def create_lobby(game_id: str, body: dict = None):
     open_count = sum(1 for lb in LOBBIES.values() if lb.phase != "done")
     if open_count >= MAX_OPEN_LOBBIES:
-        raise HTTPException(429, f"harbor at capacity: {open_count} open "
+        raise HTTPException(429, f"manifold at capacity: {open_count} open "
                                  "lobbies; finish some matches first")
     body = body or {}
     params = body.get("params", {})

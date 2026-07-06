@@ -6,7 +6,7 @@ precision until replaced. Physics is a pure step function shared by the
 live loop and the replay verifier: spawn + frame-stamped input log
 re-simulates to an identical digest.
 
-Replay check:  python -m harbor.games.prang --verify <log.jsonl>
+Replay check:  python -m manifold.games.prang --verify <log.jsonl>
 """
 
 from __future__ import annotations
@@ -468,4 +468,4 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) == 3 and sys.argv[1] == "--verify":
         raise SystemExit(verify_replay(sys.argv[2]))
-    print("usage: python -m harbor.games.prang --verify <log.jsonl>")
+    print("usage: python -m manifold.games.prang --verify <log.jsonl>")

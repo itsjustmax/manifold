@@ -1,14 +1,14 @@
-"""One-command public harbor:  python3 -m harbor.serve
+"""One-command public manifold:  python3 -m manifold.serve
 
-Boots the harbor (uvicorn) and an ngrok tunnel, discovers the public
+Boots the manifold (uvicorn) and an ngrok tunnel, discovers the public
 URL, and prints exactly what friends' agents need to connect. Local
 machine, no big servers — the tunnel is the deployment.
 
-    python3 -m harbor.serve                          # random ngrok URL
-    python3 -m harbor.serve --domain you.ngrok-free.app   # stable URL
-    python3 -m harbor.serve --no-tunnel              # LAN/local only
+    python3 -m manifold.serve                          # random ngrok URL
+    python3 -m manifold.serve --domain you.ngrok-free.app   # stable URL
+    python3 -m manifold.serve --no-tunnel              # LAN/local only
 
-The harbor gets its OWN ngrok agent, always, on its own agent-API port
+The manifold gets its OWN ngrok agent, always, on its own agent-API port
 (:4757) — it never shares or touches an agent another tool is running
 on :4040. If your plan only allows one simultaneous agent session,
 ngrok will say so; stop the other agent or upgrade, don't multiplex.
@@ -30,6 +30,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from .paths import data_dir
+
 WEB_ADDR = "127.0.0.1:4757"          # our agent's API — never 4040
 AGENT_API = f"http://{WEB_ADDR}/api/tunnels"
 
@@ -50,27 +52,27 @@ def _healthy(port: int) -> bool:
     return _api("GET", f"http://127.0.0.1:{port}/healthz") is not None
 
 
-def start_harbor(port: int) -> subprocess.Popen | None:
+def start_manifold(port: int) -> subprocess.Popen | None:
     if _healthy(port):
-        print(f"· harbor already running on :{port} — reusing it")
+        print(f"· manifold already running on :{port} — reusing it")
         return None
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "harbor.app:app",
+        [sys.executable, "-m", "uvicorn", "manifold.app:app",
          "--port", str(port), "--proxy-headers"],
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     for _ in range(60):
         if _healthy(port):
-            print(f"· harbor up on :{port}")
+            print(f"· manifold up on :{port}")
             return proc
         if proc.poll() is not None:
-            sys.exit("harbor failed to start — is uvicorn installed in "
+            sys.exit("manifold failed to start — is uvicorn installed in "
                      "this python? (pip install -r requirements.txt)")
         time.sleep(0.25)
-    sys.exit("harbor did not become healthy within 15s")
+    sys.exit("manifold did not become healthy within 15s")
 
 
 def start_tunnel(port: int, domain: str | None) -> str:
-    """Spawn a dedicated ngrok agent for the harbor and return its
+    """Spawn a dedicated ngrok agent for the manifold and return its
     public URL. Never attaches to another tool's agent."""
     if shutil.which("ngrok") is None:
         sys.exit("ngrok not found. Install it (https://ngrok.com/download), "
@@ -88,8 +90,7 @@ def start_tunnel(port: int, domain: str | None) -> str:
             cfgs.append(m.group(1).strip())
     except Exception:
         pass
-    data = Path(os.environ.get("HARBOR_DATA", "harbor_data"))
-    data.mkdir(parents=True, exist_ok=True)
+    data = data_dir()
     ours = data / "ngrok-manifold.yml"
     ours.write_text(f'version: "2"\nweb_addr: {WEB_ADDR}\n')
     cmd = ["ngrok", "http", str(port)]
@@ -117,12 +118,11 @@ def start_tunnel(port: int, domain: str | None) -> str:
 
 
 def banner(url: str, port: int) -> None:
-    data = Path(os.environ.get("HARBOR_DATA", "harbor_data"))
-    data.mkdir(parents=True, exist_ok=True)
+    data = data_dir()
     (data / "public_url.txt").write_text(url + "\n")
     print(f"""
 ──────────────────────────────────────────────────────────────
-  MANIFOLD HARBOR — open to the internet
+  MANIFOLD — open to the internet
 
   dashboard (humans):   {url}/
   games + manifests:    {url}/games
@@ -138,18 +138,18 @@ def banner(url: str, port: int) -> None:
   everyone watches:     {url}/watch/<game>/<CODE>
 
   local:                http://127.0.0.1:{port}/
-  Ctrl-C stops the tunnel (and the harbor, if we started it).
+  Ctrl-C stops the tunnel (and the manifold, if we started it).
 ──────────────────────────────────────────────────────────────
 """)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="harbor.serve")
+    ap = argparse.ArgumentParser(prog="manifold.serve")
     ap.add_argument("--port", type=int, default=8757)
     ap.add_argument("--domain", help="reserved ngrok domain for a stable URL")
     ap.add_argument("--no-tunnel", action="store_true")
-    ap.add_argument("--announce", action="append", metavar="HARBOR_URL",
-                    help="tell another harbor (a lighthouse) this one "
+    ap.add_argument("--announce", action="append", metavar="MANIFOLD_URL",
+                    help="tell another manifold (a lighthouse) this one "
                          "exists; repeatable")
     a = ap.parse_args()
 
@@ -157,9 +157,9 @@ def main() -> int:
     # too, or the uvicorn child and tunnel outlive us
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
-    harbor_proc = start_harbor(a.port)
-    if harbor_proc is not None:
-        atexit.register(harbor_proc.terminate)
+    manifold_proc = start_manifold(a.port)
+    if manifold_proc is not None:
+        atexit.register(manifold_proc.terminate)
 
     if a.no_tunnel:
         print(f"· local only: http://127.0.0.1:{a.port}/")

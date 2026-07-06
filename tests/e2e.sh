@@ -1,26 +1,26 @@
 #!/bin/bash
 # Manifold conformance suite. Usage: bash tests/e2e.sh [t1|t2|t3|all]
-# Boots a throwaway harbor on $PORT, runs mock-decider matches, asserts.
+# Boots a throwaway manifold on $PORT, runs mock-decider matches, asserts.
 set -e
 command -v setsid >/dev/null 2>&1 || setsid() { "$@"; }   # macOS lacks setsid
 PORT=${PORT:-8899}
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK=$(mktemp -d)
-export MANIFOLD_HOME="$WORK/mh" HARBOR_DATA="$WORK/data"
+export MANIFOLD_HOME="$WORK/mh" MANIFOLD_DATA="$WORK/data"
 export MANIFOLD_MESH_INTERVAL=2 MANIFOLD_MESH_ALLOW_LOCAL=1
 cd "$ROOT"
 S="http://localhost:$PORT"
 
 boot() {
-  pkill -f "[u]vicorn harbor.app.*$PORT" 2>/dev/null || true
+  pkill -f "[u]vicorn manifold.app.*$PORT" 2>/dev/null || true
   sleep 0.5
-  setsid nohup python3 -m uvicorn harbor.app:app --port "$PORT" \
-      > "$WORK/harbor.log" 2>&1 < /dev/null &
+  setsid nohup python3 -m uvicorn manifold.app:app --port "$PORT" \
+      > "$WORK/manifold.log" 2>&1 < /dev/null &
   for i in $(seq 1 40); do
     curl -s "$S/healthz" > /dev/null && return
     sleep 0.25
   done
-  echo "harbor failed to boot"; cat "$WORK/harbor.log"; exit 1
+  echo "manifold failed to boot"; cat "$WORK/manifold.log"; exit 1
 }
 
 lobby() { # game params -> code
@@ -87,8 +87,8 @@ t3() {
   for n in ada bo cy dee; do pilot "$n" mock:prang-chase 3; done
   sleep 13
   curl -s "$S/games/prang/lobbies/$C/log" > /dev/null   # touch to persist
-  LOG="$HARBOR_DATA/matches/prang-$C/log.jsonl"
-  python3 -m harbor.games.prang --verify "$LOG" | tee "$WORK/replay.txt"
+  LOG="$MANIFOLD_DATA/matches/prang-$C/log.jsonl"
+  python3 -m manifold.games.prang --verify "$LOG" | tee "$WORK/replay.txt"
   grep -q "MATCH" "$WORK/replay.txt"
   python3 -m manifold_cli verify "$LOG"
   echo "== T4 pilot generality =="
@@ -110,12 +110,12 @@ t6() {
   curl -s "$S/play/convergence/$C" > "$WORK/t6_play.html"
   curl -s "$S/llms.txt" > "$WORK/t6_llms.txt"
   curl -s "$S/source.tar.gz" | tar tz > "$WORK/t6_tar.txt"
-  grep -q "manifold/harbor/app.py" "$WORK/t6_tar.txt"
+  grep -q "manifold/manifold/app.py" "$WORK/t6_tar.txt"
   grep -q "manifold/PROTOCOL.md" "$WORK/t6_tar.txt"
   grep -q "manifold/setup.sh" "$WORK/t6_tar.txt"
-  ! grep -q "harbor_data" "$WORK/t6_tar.txt"
+  ! grep -q "manifold_data" "$WORK/t6_tar.txt"
   curl -s "$S/setup.sh" > "$WORK/t6_setup.sh"
-  grep -q "SOURCE=\"$S\"" "$WORK/t6_setup.sh"     # templated to this harbor
+  grep -q "SOURCE=\"$S\"" "$WORK/t6_setup.sh"     # templated to this manifold
   bash -n "$WORK/t6_setup.sh"                     # valid bash
   python3 - "$WORK" "$C" <<'PY'
 import sys, json, pathlib
@@ -149,8 +149,8 @@ t7() {
   # B must introduce ITSELF to A, the churn-healing path.
   printf '{"peers":[{"url":"http://127.0.0.1:%s","name":"main"}]}' "$PORT" > "$D2/peers.json"
   echo "http://127.0.0.1:8897" > "$D2/public_url.txt"
-  HARBOR_DATA="$D2" setsid nohup python3 -m uvicorn harbor.app:app --port 8897 \
-      > "$WORK/harbor2.log" 2>&1 < /dev/null &
+  MANIFOLD_DATA="$D2" setsid nohup python3 -m uvicorn manifold.app:app --port 8897 \
+      > "$WORK/manifold2.log" 2>&1 < /dev/null &
   for i in $(seq 1 40); do
     curl -s "http://localhost:8897/healthz" > /dev/null && break; sleep 0.25
   done
@@ -169,7 +169,7 @@ assert mine and mine[0].get("last_seen_utc"), ("B missing live A", b)
 assert not any(p["url"].endswith(":8897") for p in b), ("B lists itself", b)
 print("T7 PASS: auto-announce discovered, gossip mutual, no self-listing")
 PY
-  pkill -f "[u]vicorn harbor.app.*8897" 2>/dev/null || true
+  pkill -f "[u]vicorn manifold.app.*8897" 2>/dev/null || true
 }
 
 boot
@@ -181,5 +181,5 @@ case "${1:-all}" in
   t7) t7 ;;
   all) t1; t2; t3; t6; t7 ;;
 esac
-pkill -f "[u]vicorn harbor.app.*$PORT" 2>/dev/null || true
+pkill -f "[u]vicorn manifold.app.*$PORT" 2>/dev/null || true
 echo "ALL SELECTED TESTS PASSED"

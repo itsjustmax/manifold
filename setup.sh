@@ -1,10 +1,10 @@
 #!/bin/bash
-# Manifold harbor bootstrap — one paste, one harbor.
+# Manifold bootstrap — one paste, one manifold.
 #
-#   curl -sL https://<any-harbor>/setup.sh | bash
+#   curl -sL https://<any-manifold>/setup.sh | bash
 #
-# Served by every live harbor with __SOURCE_URL__ templated to its own
-# address, so the newborn harbor downloads its code from its parent and
+# Served by every live manifold with __SOURCE_URL__ templated to its own
+# address, so the newborn manifold downloads its code from its parent and
 # announces itself back to it: the mesh grows by one paste.
 #
 # Env knobs: MANIFOLD_DIR (checkout dir, default ./manifold),
@@ -30,19 +30,19 @@ if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) el
   exit 1
 fi
 
-# -- the code: parent harbor first, canonical repo second ---------------
-if [ -e "$DIR/harbor/app.py" ]; then
+# -- the code: parent manifold first, canonical repo second ---------------
+if [ -e "$DIR/manifold/app.py" ]; then
   say "using existing $DIR/"
 elif [ -n "$SOURCE" ] && curl -fsL -H "ngrok-skip-browser-warning: 1" \
       -o /tmp/manifold-src.tgz "$SOURCE/source.tar.gz" 2>/dev/null; then
   tar xzf /tmp/manifold-src.tgz && rm -f /tmp/manifold-src.tgz
   [ "$DIR" != manifold ] && mv manifold "$DIR"
-  say "downloaded source from your parent harbor: $SOURCE"
+  say "downloaded source from your parent manifold: $SOURCE"
 elif command -v git >/dev/null; then
   git clone --depth 1 "$REPO" "$DIR"
   say "cloned $REPO"
 else
-  echo "couldn't reach a harbor and git is missing — install git or retry."
+  echo "couldn't reach a manifold and git is missing — install git or retry."
   exit 1
 fi
 cd "$DIR"
@@ -54,7 +54,7 @@ python3 -m venv .venv
 say "environment ready"
 
 # -- ngrok --------------------------------------------------------------
-NEXT="cd $DIR && .venv/bin/python -m harbor.serve"
+NEXT="cd $DIR && .venv/bin/python -m manifold.serve"
 [ -n "$SOURCE" ] && NEXT="$NEXT --announce $SOURCE"
 if ! command -v ngrok >/dev/null; then
   say "one thing left: ngrok (the tunnel that puts you on the internet)"
@@ -62,7 +62,7 @@ if ! command -v ngrok >/dev/null; then
   echo "  2. authtoken: ngrok config add-authtoken <token>  (free account)"
   echo "  3. launch:    $NEXT"
   echo
-  echo "or play locally right now: cd $DIR && .venv/bin/python -m harbor.serve --no-tunnel"
+  echo "or play locally right now: cd $DIR && .venv/bin/python -m manifold.serve --no-tunnel"
   exit 0
 fi
 
@@ -72,11 +72,11 @@ if [ "${MANIFOLD_SETUP_ONLY:-}" = 1 ]; then
 fi
 
 # -- go -----------------------------------------------------------------
-say "starting your harbor (Ctrl-C stops it)"
+say "starting your manifold (Ctrl-C stops it)"
 if [ -n "$SOURCE" ]; then
-  exec .venv/bin/python -m harbor.serve --announce "$SOURCE"
+  exec .venv/bin/python -m manifold.serve --announce "$SOURCE"
 else
-  exec .venv/bin/python -m harbor.serve
+  exec .venv/bin/python -m manifold.serve
 fi
 }
 main "$@"
