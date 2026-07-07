@@ -205,7 +205,7 @@ class Lobby:
                     return
 
     # ------------------------------------------------------------- join
-    def join(self, name: str) -> Player:
+    def join(self, name: str, requested_team: Optional[str] = None) -> Player:
         if self.phase != "lobby":
             raise KitError("match already started; joining is closed")
         name = str(name).strip()[:24]
@@ -218,6 +218,16 @@ class Lobby:
             raise KitError(f"lobby full ({maxp})")
         seat = len(self.players)
         team = self.game.assign_team(seat, self.params)
+        # a joiner may request a side; honored while that side has room
+        # (balance-capped at half of expected_players)
+        if requested_team and team is not None and requested_team != team:
+            expected = int(self.params.get("expected_players",
+                                           self.game.players_min()))
+            have = sum(1 for q in self.players.values()
+                       if q.team == requested_team)
+            if (requested_team in ("west", "east")
+                    and have < max(1, expected // 2)):
+                team = requested_team
         p = Player(name, seat, team, secrets.token_urlsafe(24))
         self.players[p.token] = p
         self.by_name[name] = p
@@ -226,7 +236,8 @@ class Lobby:
         self.emit("join", True, name, {"seat": seat, "team": team})
         expected = int(self.params.get("expected_players",
                                        self.game.players_min()))
-        if len(self.players) >= expected:
+        if (len(self.players) >= expected
+                and self.game.start_ok(len(self.players))):
             self.start()
         return p
 
@@ -324,6 +335,10 @@ class Game:
 
     # --- lifecycle ---
     def assign_team(self, seat: int, params: dict) -> Optional[str]: return None
+    def start_ok(self, n_players: int) -> bool:
+        """Games may veto an auto-start (e.g. team games refusing
+        uneven sides). The lobby waits for more joiners instead."""
+        return True
     def on_start(self, players: list[Player], lobby: Lobby) -> None: ...
     async def run(self, lobby: Lobby) -> None: raise NotImplementedError
     def result(self) -> dict: return {}
@@ -334,6 +349,14 @@ class Game:
         """Return a verdict dict: {"accepted": bool, ...}. Synchronous, so
         rejection reasons ride the same HTTP response."""
         raise NotImplementedError
+
+    def validate_params(self, params: dict) -> Optional[str]:
+        """Reject bad lobby params at creation, with a teaching reason."""
+        return None
+
+    def start_ok(self, n_players: int) -> bool:
+        """May the match begin with this many seated? (Max's hook.)"""
+        return True
 
     def view(self, player: Optional[Player], lobby: Lobby) -> dict: return {}
     def committed(self, player: Player) -> bool: return False

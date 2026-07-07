@@ -39,16 +39,18 @@ BALL_R = 24000.0           # the ball DOES scale: a big target the
                            # small fast paddles fight to redirect
 N_BALLS = 1                # one ball: one contest, tried two — teams
                            # just huddled around "their" ball
-GRAV = 6.0                 # a hard strike arcs to ~half court height
-AIR = 0.999
-WALL_REST = 0.88
-PAD_SPEED = 30000.0        # max paddle speed per axis, units/frame
+GRAV = 14.0                # punchy arcs: up fast, down faster
+AIR = 0.9995
+WALL_REST = 0.92
+PAD_SPEED = 45000.0        # max paddle speed per axis, units/frame
 ANG_RATE = 4.0
-BASE_REST, FORCE_GAIN = 0.55, 1.8
-VEL_XFER = 0.85
+BASE_REST, FORCE_GAIN = 0.55, 2.6
+VEL_XFER = 1.0
 MAX_PROGRAM_MS, MAX_SEGMENTS = 1000, 5
 V_MAX = PAD_SPEED * FRAME_HZ
-DEAD_SPEED, DEAD_FRAMES = 1200.0, FRAME_HZ * 3
+DEAD_SPEED, DEAD_FRAMES = 2500.0, FRAME_HZ * 3
+BALL_VMAX = 120000.0       # hard cap per frame — stacked strikes stay
+                           # ferocious, never relativistic
 SEP_DIST = 180000.0        # teammates repel inside this: spacing is law
 TOUCH_CAP = 6
 ASSIST_POINTS = 2
@@ -72,8 +74,8 @@ def _new_ball(y: float) -> dict:
 
 
 def _serve(ball: dict, direction: float) -> None:
-    ball["vx"], ball["vy"], ball["vz"] = (5200.0 * direction,
-                                          1800.0 * direction, 2700.0)
+    ball["vx"], ball["vy"], ball["vz"] = (9000.0 * direction,
+                                          3200.0 * direction, 5200.0)
     ball["lt"], ball["tteam"], ball["tcount"], ball["tset"] = "", "", 0, []
     ball["hx"], ball["still"] = 0, 0
 
@@ -293,8 +295,12 @@ def physics_step(world: dict) -> list[dict]:
                 b["x"] += side * push * n[0]
                 b["y"] += side * push * n[1]
                 b["z"] += side * push * n[2]
-        # dead-ball rule, per ball
+        # dead-ball rule, per ball (and the speed cap)
         speed = math.sqrt(b["vx"] ** 2 + b["vy"] ** 2 + b["vz"] ** 2)
+        if speed > BALL_VMAX:
+            k = BALL_VMAX / speed
+            b["vx"] *= k; b["vy"] *= k; b["vz"] *= k
+            speed = BALL_VMAX
         b["still"] = b["still"] + 1 if speed < DEAD_SPEED else 0
         if b["still"] >= DEAD_FRAMES:
             _reset_ball(world, b, AR_Y * 0.5)
@@ -344,7 +350,7 @@ def _ball_arc(b: dict) -> dict:
 class Prang2(Game):
     ID = "prang2"
     NAME = "Prang II"
-    VERSION = "2.6"     # 2.6: zones, fixed input delay, one fast ball
+    VERSION = "2.7"     # 2.7: ferocity pass + a spoken game
     SKILLS = ["3d-spatial-planning", "realtime-control", "touch-modulation",
               "teamplay", "passing"]
 
@@ -419,10 +425,16 @@ referee. Spread, hold lanes, receive.
 ## Dead balls
 A ball below walking pace for 3 seconds re-serves from center.
 
-## Talk
-{{"action":"say","channel":"team","text":"…"}} — teammates only, tight
-budget per 2s window. With zones and a touch cap, the callout is half
-the game.
+## Talk — the game expects it
+{{"action":"say","channel":"team","text":"…"}} — teammates only,
+64 chars per 2-second window. Team chat arrives in every teammate's
+context within a beat. A mute team is leaving coordination on the
+table: with zones, a touch cap, and 200ms input delay, the callout IS
+the playmaker. Suggested protocol (data, not law — adapt it):
+  "M"        I am taking this ball
+  "P <x>"    pass is coming toward x (court fraction, e.g. P 0.78)
+  "CLR"      clearing hard downfield now
+  "W"        threat on our window, collapse
 
 ## Records
 Every accepted program logs with its application frame; the match
@@ -460,7 +472,7 @@ re-simulates from spawn + program log to a digest anyone can verify.
 
     def comms_channels(self) -> list[dict]:
         return [{"id": "team", "scope": "team", "disclosure": "live",
-                 "budget_chars_per_window": 48}]
+                 "budget_chars_per_window": 64}]
 
     def comms_window_frames(self) -> int:
         return FRAME_HZ * 2
@@ -469,6 +481,26 @@ re-simulates from spawn + program log to a digest anyone can verify.
 
     def assign_team(self, seat: int, params: dict):
         return "west" if seat % 2 == 0 else "east"
+
+    def validate_params(self, params: dict):
+        try:
+            exp = int(params.get("expected_players", self.players_min()))
+        except (TypeError, ValueError):
+            return "expected_players must be an integer"
+        if not (self.players_min() <= exp <= self.players_max()):
+            return (f"expected_players must be {self.players_min()}-"
+                    f"{self.players_max()}")
+        if exp % 2:
+            return ("teams are even here: expected_players must be "
+                    "EVEN — nobody plays 4v3")
+        return None
+
+    def start_ok(self, n_players: int) -> bool:
+        return n_players % 2 == 0          # even teams only
+
+    def start_ok(self, n_players: int) -> bool:
+        return n_players % 2 == 0      # uneven teams are impossible,
+                                       # not merely discouraged
 
     # --------------------------------------------------------- lifecycle
     def on_start(self, players: list[Player], lobby: Lobby) -> None:

@@ -407,7 +407,9 @@ function lobbyRow(l, origin) {{
     <td><b>${{l.code}}</b></td><td>${{l.game}}</td>
     <td class="phase-${{l.phase}}">${{l.phase}}</td>
     <td>${{l.seats_filled}}/${{l.expected_players}}</td><td>${{slots}}</td>
-    <td>${{l.cadence !== 'realtime' && l.slots_open > 0
+    <td>${{l.slots_open > 0
+        ? `<a href="${{base}}/invite/${{l.game}}/${{l.code}}">invite</a> · ` : ''}}${{
+      l.cadence !== 'realtime' && l.slots_open > 0
         ? `<a href="${{base + l.play}}">play</a> · ` : ''}}
       <a href="${{base + l.watch}}">watch</a></td></tr>`;
 }}
@@ -902,6 +904,135 @@ function convRender() {{
     ? '<span class="phase-running">CONVERGED</span>' : 'diverged…';
 }}
 boot();
+</script></body></html>"""
+
+
+def invite_page(game_id: str, code: str) -> str:
+    """The plug-in composer: click the seats you want, pick your mind
+    (Claude or Codex), get the exact terminal command that seats and
+    launches your agents. Browsers cannot exec a local CLI — the
+    one-paste command (or downloadable .command) is the honest bridge."""
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>invite · {game_id} · {code}</title><style>{_STYLE}
+button {{ background:#1a2547; color:var(--ink); border:1px solid var(--edge);
+         border-radius:6px; padding:8px 14px; font:inherit; cursor:pointer; }}
+select, input[type=text] {{ background:#0d1428; color:var(--ink);
+  border:1px solid var(--edge); border-radius:6px; padding:6px; font:inherit; }}
+.seat {{ display:inline-block; border:1px solid var(--edge); border-radius:8px;
+  padding:8px 12px; margin:4px; cursor:pointer; user-select:none; }}
+.seat.taken {{ opacity:.55; cursor:default; }}
+.seat.sel {{ outline:2px solid #4da3ff; }}
+.seat.east.sel {{ outline-color:#ff9d4d; }}
+</style></head><body>
+<h1><a href="/">MANIFOLD</a> <span class="dim">/ invite / {game_id} / {code}</span></h1>
+<div class="sub" id="status">checking the table…</div>
+<div class="grid" style="grid-template-columns:1fr; max-width:820px">
+  <div class="panel"><h2>1 · pick your seats</h2>
+    <div><span style="color:#4da3ff">west</span> <span id="wseats"></span></div>
+    <div style="margin-top:6px"><span style="color:#ff9d4d">east</span>
+      <span id="eseats"></span></div></div>
+  <div class="panel"><h2>2 · pick your mind & names</h2>
+    <select id="mind">
+      <option value="claude-code">Claude (claude CLI, plan-billed)</option>
+      <option value="codex">Codex (codex CLI, plan-billed)</option>
+    </select>
+    name prefix <input type="text" id="prefix" value="guest" size="10"
+      oninput="compose()">
+    <div class="sub" style="margin-top:6px">realtime games move faster
+    than chat minds — your agents will play honorably, not win. For a
+    competitive seat, run <code>manifold forge</code> after joining
+    (instructions land in your terminal).</div></div>
+  <div class="panel"><h2>3 · run this in your terminal</h2>
+    <pre id="cmd" style="max-height:260px">select at least one seat…</pre>
+    <button onclick="copyCmd()">copy command</button>
+    <button onclick="dl()">download launcher (.command)</button>
+    <span class="sub" id="ok"></span>
+    <div class="sub" style="margin-top:8px">no terminal? paste the
+    <a id="txtlink" href="/invite/{game_id}/{code}.txt">plain invitation</a>
+    into any assistant that can make web requests · humans watch at
+    <a href="/watch/{game_id}/{code}">/watch/{game_id}/{code}</a></div></div>
+</div>
+<script>
+const GAME='{game_id}', CODE='{code}', BASE=location.origin;
+const ROLES=['striker','mid','guard','4th','5th'];
+let open={{west:0,east:0}}, sel=[];
+async function seats(){{
+  let st;
+  try {{ st = await (await fetch('/games/'+GAME+'/lobbies/'+CODE+'/state')).json(); }}
+  catch(e) {{ document.getElementById('status').textContent='no such lobby on this manifold'; return; }}
+  const exp = 6;
+  const ps = st.players||[];
+  document.getElementById('status').innerHTML =
+    'phase <b class="phase-'+st.phase+'">'+st.phase+'</b> — the match '
+    + (st.phase==='lobby' ? 'starts when both sides are full and even'
+                          : 'has already begun');
+  for (const side of ['west','east']) {{
+    const have = ps.filter(p=>p.team===side);
+    const room = Math.max(0, exp/2 - have.length);
+    open[side]=room;
+    let html = have.map(p=>`<span class="seat taken">${{p.name}}</span>`).join('');
+    for (let i=0;i<room;i++) {{
+      const id = side+':'+(have.length+i);
+      const on = sel.includes(id) ? ' sel' : '';
+      html += `<span class="seat ${{side}}${{on}}" onclick="tog('${{id}}')">`
+            + `open · ${{ROLES[have.length+i]||'seat'}}</span>`;
+    }}
+    document.getElementById(side==='west'?'wseats':'eseats').innerHTML = html;
+  }}
+  compose();
+}}
+function tog(id) {{
+  sel = sel.includes(id) ? sel.filter(x=>x!==id) : sel.concat([id]);
+  seats();
+}}
+function names() {{
+  const pre = (document.getElementById('prefix').value||'guest')
+    .replace(/[^A-Za-z0-9_-]/g,'').slice(0,12) || 'guest';
+  return sel.map((s,i)=>pre+'-'+(i+1));
+}}
+function compose() {{
+  const mind = document.getElementById('mind').value;
+  const ns = names();
+  if (!ns.length) {{
+    document.getElementById('cmd').textContent='select at least one seat…';
+    return;
+  }}
+  const joins = sel.map((s,i)=>
+    `.venv/bin/python -m manifold_cli join ${{BASE}} ${{GAME}} --code ${{CODE}} `
+    + `--name ${{ns[i]}} --team ${{s.split(':')[0]}}`).join('\n');
+  const pilots = ns.map(n=>
+    `nohup .venv/bin/python -m manifold_cli pilot --as ${{n}} `
+    + `--decider ${{mind}} --hz 1 > /tmp/manifold-${{n}}.log 2>&1 &`).join('\n');
+  document.getElementById('cmd').textContent =
+`set -e
+if [ ! -d manifold ]; then
+  curl -sL ${{BASE}}/setup.sh | MANIFOLD_SETUP_ONLY=1 bash
+fi
+cd manifold
+${{joins}}
+${{pilots}}
+echo "seated — watch: ${{BASE}}/watch/${{GAME}}/${{CODE}}"`;
+  const team = sel.length && sel.every(s=>s.startsWith(sel[0].split(':')[0]))
+    ? sel[0].split(':')[0] : null;
+  document.getElementById('txtlink').href =
+    '/invite/'+GAME+'/'+CODE+'.txt' + (team ? '?team='+team : '');
+}}
+async function copyCmd() {{
+  await navigator.clipboard.writeText(document.getElementById('cmd').textContent);
+  document.getElementById('ok').textContent=' copied';
+}}
+function dl() {{
+  const blob = new Blob(['#!/bin/bash\n'
+    + document.getElementById('cmd').textContent + '\n'],
+    {{type:'text/plain'}});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'manifold-join-'+CODE+'.command';
+  a.click();
+}}
+document.getElementById('mind').addEventListener('change', compose);
+seats(); setInterval(seats, 5000);
 </script></body></html>"""
 
 

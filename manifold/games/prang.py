@@ -286,6 +286,21 @@ result. Anyone can verify.
     def assign_team(self, seat: int, params: dict):
         return "west" if seat % 2 == 0 else "east"
 
+    def validate_params(self, params: dict):
+        try:
+            exp = int(params.get("expected_players", self.players_min()))
+        except (TypeError, ValueError):
+            return "expected_players must be an integer"
+        if exp % 2:
+            return "even teams only: expected_players must be even"
+        return None
+
+    def start_ok(self, n_players: int) -> bool:
+        return n_players % 2 == 0          # even teams only
+
+    def start_ok(self, n_players: int) -> bool:
+        return n_players % 2 == 0
+
     # --------------------------------------------------------- lifecycle
     def on_start(self, players: list[Player], lobby: Lobby) -> None:
         self.match_seconds = float(lobby.params.get("match_seconds", 120))

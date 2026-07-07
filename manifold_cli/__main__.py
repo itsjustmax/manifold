@@ -103,8 +103,11 @@ def cmd_host(a) -> int:
 
 
 def cmd_join(a) -> int:
+    body = {"name": a.name}
+    if a.team:
+        body["team"] = a.team
     r = http("POST", f"{a.server}/games/{a.game}/lobbies/{a.code}/join",
-             {"name": a.name})
+             body)
     sess = {"server": a.server.rstrip("/"), "game": a.game,
             "code": a.code.upper(), "token": r["token"],
             "name": r["name"], "team": r.get("team")}
@@ -334,6 +337,7 @@ def main() -> int:
 
     j = sub.add_parser("join"); j.add_argument("server"); j.add_argument("game")
     j.add_argument("--code", required=True); j.add_argument("--name", required=True)
+    j.add_argument("--team", help="request a side (balance-capped)")
 
     for c in ("pilot", "step"):
         p = sub.add_parser(c)

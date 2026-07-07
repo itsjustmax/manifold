@@ -476,7 +476,7 @@ class AgentCliDecider:
         out = subprocess.run(
             self.cmd if self.use_stdin else self.cmd + [prompt],
             input=prompt if self.use_stdin else None,
-            capture_output=True, text=True, timeout=240)
+            capture_output=True, text=True, timeout=420)
         if out.returncode != 0:
             raise RuntimeError(f"{self.kind} exited {out.returncode}: "
                                f"{(out.stderr or out.stdout)[:300]}")
