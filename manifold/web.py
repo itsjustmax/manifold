@@ -342,7 +342,9 @@ def _home_html() -> str:
     <table id="lobbies"><tr><td class="dim">loading…</td></tr></table>
     <div class="sub" id="joinhint" style="margin-top:8px"></div></div>
   <div class="panel" style="grid-column:1/-1"><h2>Elsewhere on the mesh</h2>
-    <table id="mesh"><tr><td class="dim">asking peer manifolds…</td></tr></table></div>
+    <table id="mesh"><tr><td class="dim">asking peer manifolds…</td></tr></table>
+    <h2 style="margin-top:14px">Replays from the mesh</h2>
+    <table id="meshreplays"><tr><td class="dim">…</td></tr></table></div>
   <div class="panel" style="grid-column:1/-1"><h2>Match archive — watch any game back</h2>
     <table id="archive"><tr><td class="dim">loading…</td></tr></table></div>
   <div class="panel"><h2>Games on this manifold</h2><div id="games" class="dim">loading…</div></div>
@@ -442,6 +444,28 @@ async function mesh() {{
     + (rows.join('') || `<tr><td colspan="7" class="dim">${{peers.length
         ? 'peers listed but none answered'
         : 'no peer manifolds yet — see HOSTING.md to link or announce one'}}</td></tr>`);
+  const rrows = [];
+  await Promise.all(peers.slice(0, 6).map(async p => {{
+    try {{
+      const ctl = new AbortController();
+      setTimeout(() => ctl.abort(), 4000);
+      const r = await fetch(p.url + '/matches', {{signal: ctl.signal}});
+      for (const m of ((await r.json()).matches || []).slice(0, 4)) {{
+        const res = m.result || {{}};
+        const sum = res.aborted ? 'aborted'
+          : res.score ? `west ${{res.score.west}} — ${{res.score.east}} east`
+          : res.converged !== undefined
+            ? (res.converged ? `converged r${{res.round}}` : 'no convergence')
+          : res.island ? 'island resolved' : '—';
+        rrows.push(`<tr><td class="dim">${{new URL(p.url).host}}</td>
+          <td><b>${{m.code}}</b></td><td>${{m.game}}</td><td>${{sum}}</td>
+          <td><a href="${{p.url + m.replay}}">▶ replay</a></td></tr>`);
+      }}
+    }} catch (e) {{}}
+  }}));
+  document.getElementById('meshreplays').innerHTML =
+    '<tr><th>manifold</th><th>code</th><th>game</th><th>result</th><th></th></tr>'
+    + (rrows.join('') || '<tr><td colspan="5" class="dim">none reachable</td></tr>');
 }}
 async function boards() {{
   const g = await J('/games'); const out = [];

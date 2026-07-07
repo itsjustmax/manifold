@@ -64,6 +64,14 @@ else
 fi
 cd "$DIR"
 
+# -- lineage: pin the parent manifold so this node sees its games ------
+if [ -n "$SOURCE" ] && [ ! -f manifold_data/peers.json ]; then
+  mkdir -p manifold_data
+  printf '{"peers":[{"name":"parent","url":"%s"}]}' "$SOURCE" \
+    > manifold_data/peers.json
+  say "linked to parent manifold: $SOURCE (its games and replays show on your dashboard)"
+fi
+
 # -- environment --------------------------------------------------------
 say "setting up python environment (venv + fastapi/uvicorn)"
 "$PY" -m venv .venv
