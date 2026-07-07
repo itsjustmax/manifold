@@ -1047,7 +1047,11 @@ function compose() {{
     .join('\\n');
   let middle, pilots;
   if (mode === 'forge') {{
-    middle = `echo "forging ${{ns.length}} positions in parallel — your ${{mind}} tunes a served framework (a few minutes)…"\\n`
+    middle = `echo "team huddle — your minds agree a callout language first…"\\n`
+      + ns.map(n=>
+        `.venv/bin/python -m manifold_cli huddle --as ${{n}} --using ${{mind}} || true`)
+        .join('\\n')
+      + `\\necho "forging ${{ns.length}} positions in parallel — implementing the huddled protocol (a few minutes)…"\\n`
       + ns.map(n=>
         `.venv/bin/python -m manifold_cli forge --as ${{n}} --using ${{mind}} &`)
         .join('\\n')

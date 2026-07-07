@@ -131,16 +131,16 @@ class Comms:
         for m in self.messages[-60:]:
             if done:
                 out.append(m)
+            elif (m["scope"] == "team" and player is not None
+                  and player.team == m["team"]):
+                out.append(m)      # your team's channel is yours, always
             elif m["disclosure"] != "live":
                 continue
             elif m["scope"] == "all":
                 out.append(m)
-            elif m["scope"] == "team":
-                if player is not None and player.team == m["team"]:
-                    out.append(m)
-                elif (player is None and
-                      frame - m["frame"] >= self.BROADCAST_DELAY_FRAMES):
-                    out.append(m)
+            elif (m["scope"] == "team" and player is None and
+                  frame - m["frame"] >= self.BROADCAST_DELAY_FRAMES):
+                out.append(m)
         return [{k: m[k] for k in ("channel", "from", "text",
                                    "frame", "team")} for m in out]
 
@@ -370,6 +370,11 @@ class Game:
     def start_ok(self, n_players: int) -> bool:
         """May the match begin with this many seated? (Max's hook.)"""
         return True
+
+    def on_say(self, player: "Player", channel: str, text: str,
+               frame: int) -> None:
+        """Notified after an accepted say — games may score comms."""
+        return None
 
     def policy_skeleton(self) -> Optional[str]:
         """A working starter policy (proc protocol) that forge hands to

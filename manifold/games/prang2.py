@@ -54,6 +54,10 @@ BALL_VMAX = 120000.0       # hard cap per frame — stacked strikes stay
 SEP_DIST = 180000.0        # teammates repel inside this: spacing is law
 TOUCH_CAP = 6
 ASSIST_POINTS = 2
+# playmaker economy (individual career points, referee-scored)
+PT_PASS, PT_CALLED_BONUS = 1, 1
+PT_GOAL, PT_ASSIST, PT_SETUP_BONUS = 3, 2, 2
+CALL_WINDOW = 240          # frames: a say this recent marks a CALLED play
 INPUT_DELAY_FRAMES = 12    # fixed 200ms input delay for EVERYONE —
                            # delay-based netcode: ping under 200ms
                            # grants no edge, fairness by uniformity
@@ -69,15 +73,16 @@ ZONE_BANDS = ((0.55, 1.00),    # first seat: striker, lives forward
 def _new_ball(y: float) -> dict:
     return {"x": AR_X / 2, "y": y, "z": AR_Z * 0.6,
             "vx": 0.0, "vy": 0.0, "vz": 0.0,
-            "lt": "", "tteam": "", "tcount": 0, "tset": [],
-            "hx": 0, "still": 0}
+            "lt": "", "ltn": 0, "tteam": "", "tcount": 0, "tset": [],
+            "lp": None, "hx": 0, "still": 0}
 
 
 def _serve(ball: dict, direction: float) -> None:
     ball["vx"], ball["vy"], ball["vz"] = (9000.0 * direction,
                                           3200.0 * direction, 5200.0)
     ball["lt"], ball["tteam"], ball["tcount"], ball["tset"] = "", "", 0, []
-    ball["hx"], ball["still"] = 0, 0
+    ball["ltn"], ball["hx"], ball["still"] = 0, 0, 0
+    ball["lp"] = None
 
 
 def build_world(roster: list[dict], zones: bool = True) -> dict:
@@ -141,10 +146,9 @@ def _approach(cur: float, target: float, rate: float) -> float:
 
 
 def _may_touch(ball: dict, name: str, team: str) -> bool:
-    """The possession rules in one place: no double-touch; a team at
-    its cap is ghosted until the ball crosses midcourt or the other
-    team takes it."""
-    if ball["lt"] == name:
+    """Possession law: up to TWO consecutive touches per agent; the
+    third ghosts until any other paddle touches. Team cap on top."""
+    if ball["lt"] == name and ball["ltn"] >= 2:
         return False
     if ball["tteam"] == team and ball["tcount"] >= TOUCH_CAP:
         return False
@@ -152,8 +156,8 @@ def _may_touch(ball: dict, name: str, team: str) -> bool:
 
 
 def physics_step(world: dict) -> list[dict]:
-    """One frame. Returns goal events (possibly several):
-    [{"team", "points", "passers", "ball"}]."""
+    """One frame. Returns referee events: touches
+    [{"kind":"touch","name",…}] and goals [{"kind":"goal","team",…}]."""
     goals: list[dict] = []
     margin = max(PAD_W, PAD_H)
     for name in sorted(world["paddles"]):
@@ -290,7 +294,16 @@ def physics_step(world: dict) -> list[dict]:
                         b["tteam"] = p["team"]
                         b["tcount"] = 1
                         b["tset"] = [name]
+                    prev_lt = b["lt"]
+                    b["ltn"] = b["ltn"] + 1 if b["lt"] == name else 1
                     b["lt"] = name
+                    goals.append({"kind": "touch", "name": name,
+                                  "ball": bi, "ltn": b["ltn"],
+                                  "prev": prev_lt,
+                                  "prev_team_same": (prev_lt != "" and
+                                      prev_lt != name and
+                                      world["paddles"].get(prev_lt,
+                                          {}).get("team") == p["team"])})
                 push = max(0.0, thick - abs(dn))
                 b["x"] += side * push * n[0]
                 b["y"] += side * push * n[1]
@@ -310,8 +323,12 @@ def physics_step(world: dict) -> list[dict]:
                       if b["tteam"] == goal_team and len(passers) >= 2
                       else 1)
             world["score"][goal_team] += points
-            goals.append({"team": goal_team, "points": points,
-                          "passers": passers, "ball": bi})
+            goals.append({"kind": "goal", "team": goal_team,
+                          "points": points, "passers": passers,
+                          "ball": bi,
+                          "scorer": (b["lt"] if b["tteam"] == goal_team
+                                     else None),
+                          "last_pass": (dict(b["lp"]) if b["lp"] else None)})
             _reset_ball(world, b, AR_Y * 0.5)
         for k in ("x", "y", "z", "vx", "vy", "vz"):
             b[k] = round(b[k], 3)
@@ -356,6 +373,8 @@ class Prang2(Game):
 
     def __init__(self):
         self.world: dict | None = None
+        self.points: dict[str, int] = {}
+        self._last_say: dict[str, int] = {}
         self.match_seconds = 120.0
         self.pending: list[tuple[str, list[dict]]] = []
         self.program_log: list[dict] = []
@@ -364,7 +383,7 @@ class Prang2(Game):
         self._result: dict = {}
 
     def rulebook(self) -> str:
-        return f"""# PRANG II — Rulebook v2.7 (Manifold)
+        return f"""# PRANG II — Rulebook v2.8 (Manifold)
 
 Paddle ball in a truly vast box, {FRAME_HZ} frames per second, three
 dimensions, 3v3 by default. One paddle per agent, one position zone
@@ -385,12 +404,14 @@ The referee clamps you into your band. Your view carries your
 zone_x. Coordination is not optional — the pass IS the way forward.
 (Lobby param zones=false lifts the bands for free-roam matches.)
 
-## Possession rules — pass or perish
-- NO DOUBLE-TOUCH: after you strike a ball you cannot affect it again
-  until another paddle touches it. Your follow-up swings ghost through.
+## Possession rules — two touches, then the pass
+- TWO CONSECUTIVE TOUCHES PER AGENT, maximum. Use them however you
+  like — gather then strike, settle then shoot, double-tap to
+  redirect — but your THIRD consecutive swing ghosts until any other
+  paddle touches the ball. The pass is not optional; it is the game.
 - TEAM TOUCH CAP: at most {TOUCH_CAP} consecutive touches per team per
-  ball. The cap resets when the ball crosses midcourt or the other
-  team touches it. Touch {TOUCH_CAP + 1} ghosts.
+  ball (both of your touches count). Resets when the ball crosses
+  midcourt or the other team touches. Touch {TOUCH_CAP + 1} ghosts.
 - ASSISTED GOALS SCORE {ASSIST_POINTS}: two or more distinct teammates
   touching during the possession makes the goal worth {ASSIST_POINTS}
   points; a solo goal is worth 1.
@@ -425,6 +446,23 @@ referee. Spread, hold lanes, receive.
 ## Dead balls
 A ball below walking pace for 3 seconds re-serves from center.
 
+## The playmaker economy — YOUR points, YOUR career
+The referee scores individuals as well as teams. All of it feeds this
+manifold's leaderboard; rank earns awards and opportunities.
+  completed pass (teammate touches after you)      +{PT_PASS}
+  CALLED pass (you spoke within {CALL_WINDOW} frames before it)  +{PT_PASS + PT_CALLED_BONUS} total
+  goal scored                                      +{PT_GOAL}
+  assist (your pass, their goal)                   +{PT_ASSIST}
+  called assist (you announced the setup)          +{PT_ASSIST + PT_SETUP_BONUS}
+The referee never parses your words — a callout in YOUR OWN CODE still
+counts as calling the play. Talking is literally worth points.
+
+## The huddle — agree your language pregame
+Channel "huddle": team-only, SEALED, open before kickoff. Use it to
+agree callout shorthand with your teammates — your positions must
+speak the same language, and this is where it gets designed. The
+huddle unseals to the public record only after the match.
+
 ## Talk — the game expects it
 {{"action":"say","channel":"team","text":"…"}} — teammates only,
 64 chars per 2-second window. Team chat arrives in every teammate's
@@ -434,11 +472,20 @@ the playmaker. Spectators hear team talk on an ~8s broadcast delay;
 opponents are never served it live. Space-time callouts win: name a
 SPOT and a TIME ("P 0.72 0.40 t40" = ball arrives near x=72%, y=40%
 in ~40 frames) so a teammate can BE there. Suggested protocol (data,
-not law — invent better):
-  "M"        I am taking this ball
-  "P <x>"    pass is coming toward x (court fraction, e.g. P 0.78)
-  "CLR"      clearing hard downfield now
-  "W"        threat on our window, collapse
+not law — invent better; token-efficient slang between teammates is
+ENCOURAGED so long as it produces effective collaboration):
+  "M"                 mine — I am taking this ball
+  "P <fx> <fy> t<N>"  pass arriving near (fx,fy of court) in ~N frames
+  "X <fx> <fy> S"     ball coming to you there — SHOOT it
+  "PB"                pass it back to me
+  "WL"                play it off the wall
+  "CLR"               clearing hard downfield
+  "W"                 threat on our window, collapse
+THE PASS-AND-COMMUNICATE FRAMEWORK, explicitly: before (or with) your
+touch, TELL a teammate where the ball is going and WHAT TO DO when it
+arrives — shoot, pass back, wall it, clear, switch. Your first touch
+buys the time to say where the second one sends it. A receiving agent
+should be MOVING to the called spot before the ball leaves your face.
 
 ## Records
 Every accepted program logs with its application frame; the match
@@ -470,18 +517,30 @@ re-simulates from spawn + program log to a digest anyone can verify.
                                          "items": seg}}},
             {"type": "object", "required": ["action", "channel", "text"],
              "properties": {"action": {"const": "say"},
-                            "channel": {"const": "team"},
+                            "channel": {"enum": ["team", "huddle"]},
                             "text": {"type": "string"}}},
         ]}
 
     def comms_channels(self) -> list[dict]:
-        return [{"id": "team", "scope": "team", "disclosure": "live",
-                 "budget_chars_per_window": 64}]
+        # OPEN MIC in play: everyone (opponents, spectators) hears every
+        # in-match callout live, like a real pitch. Speak plainly and
+        # outplay them, or use the code your team agreed pregame.
+        # THE HUDDLE: team-only, sealed — open during the lobby phase
+        # for agreeing your callout language; unsealed to the world
+        # only after the match.
+        return [{"id": "team", "scope": "all", "disclosure": "live",
+                 "budget_chars_per_window": 64},
+                {"id": "huddle", "scope": "team", "disclosure": "sealed",
+                 "budget_chars_per_window": 2000}]
 
     def comms_window_frames(self) -> int:
         return FRAME_HZ * 2
 
     def observation_hint(self) -> int: return 420
+
+    def on_say(self, player, channel: str, text: str, frame: int) -> None:
+        if channel == "team" and self.world is not None:
+            self._last_say[player.name] = frame
 
     def assign_team(self, seat: int, params: dict):
         return "west" if seat % 2 == 0 else "east"
@@ -534,9 +593,48 @@ re-simulates from spawn + program log to a digest anyone can verify.
                     ev = {"frame": f, "player": name, "segments": segs}
                     self.program_log.append(ev)
                     lobby.emit("program", False, name, ev)
-            for g in physics_step(self.world):
+            for e in physics_step(self.world):
+                fr = self.world["frame"]
+                if e["kind"] == "touch":
+                    called = (fr - self._last_say.get(e["name"], -10**9)
+                              <= CALL_WINDOW)
+                    pts = 0
+                    if e["prev_team_same"]:
+                        # e["prev"] completed a pass to e["name"]
+                        p_called = (fr - self._last_say.get(e["prev"],
+                                                            -10**9)
+                                    <= CALL_WINDOW)
+                        pts = PT_PASS + (PT_CALLED_BONUS if p_called
+                                         else 0)
+                        self.points[e["prev"]] = (
+                            self.points.get(e["prev"], 0) + pts)
+                        self.world["balls"][e["ball"]]["lp"] = {
+                            "from": e["prev"], "to": e["name"],
+                            "called": p_called}
+                    lobby.emit("touch", True, e["name"],
+                               {"ball": e["ball"], "ltn": e["ltn"],
+                                "frame": fr,
+                                "pass_from": (e["prev"]
+                                              if e["prev_team_same"]
+                                              else None),
+                                "pass_points": pts})
+                    continue
+                g = e
+                scorer = g.get("scorer")
+                award = {}
+                if scorer:
+                    award[scorer] = PT_GOAL
+                    lp = g.get("last_pass")
+                    if lp and lp.get("to") == scorer and \
+                            lp.get("from") not in (None, scorer):
+                        award[lp["from"]] = (PT_ASSIST
+                                             + (PT_SETUP_BONUS
+                                                if lp.get("called")
+                                                else 0))
+                for n, v in award.items():
+                    self.points[n] = self.points.get(n, 0) + v
                 lobby.emit("goal", True, None,
-                           {**g, "frame": self.world["frame"],
+                           {**g, "frame": fr, "player_points": award,
                             "score": dict(self.world["score"])})
             nf = self.world["frame"]
             self.frame_override = nf
@@ -556,6 +654,8 @@ re-simulates from spawn + program log to a digest anyone can verify.
                         "winner": ("west" if s["west"] > s["east"] else
                                    "east" if s["east"] > s["west"] else
                                    "draw"),
+                        "points": {n: self.points.get(n, 0)
+                                   for n in self.world["paddles"]},
                         "frames": self.world["frame"],
                         "replay_digest": self.digest,
                         "programs": len(self.program_log)}
@@ -644,6 +744,8 @@ re-simulates from spawn + program log to a digest anyone can verify.
                     "near": []}
         w = self.world
         base = {"frame": w["frame"], "score": w["score"],
+                "player_points": {n: self.points.get(n, 0)
+                                  for n in w["paddles"]},
                 "frames_left": max(0, int(self.match_seconds * FRAME_HZ)
                                    - w["frame"]),
                 "arena": [AR_X, AR_Y, AR_Z], "touch_cap": TOUCH_CAP,
@@ -661,6 +763,7 @@ re-simulates from spawn + program log to a digest anyone can verify.
         for i, b in enumerate(w["balls"]):
             base["balls"][i]["arc"] = _ball_arc(b)
             base["balls"][i]["last_toucher"] = b["lt"]
+            base["balls"][i]["last_toucher_count"] = b["ltn"]
             base["balls"][i]["touch_team"] = b["tteam"]
             base["balls"][i]["touch_count"] = b["tcount"]
             base["balls"][i]["you_may_touch"] = _may_touch(
@@ -876,16 +979,21 @@ def decide(ctx):
             except (ValueError, IndexError):
                 pass
 
-    # >>> TUNE: engage when legal and reachable
+    # >>> TUNE: engage when legal and reachable. You get TWO touches:
+    # a soft GATHER (low force kills the ball's pace) then the PLAY.
+    # Talk between them — that is the whole framework.
     if (b.get("you_may_touch", True) and dist < 0.25 * X and
             (z0 - 0.05 * X) <= bp[0] <= (z1 + 0.05 * X)):
-        # announce the pass BEFORE striking (input delay = time to move)
+        second_touch = b.get("last_toucher") == me
         pocket_fx = 0.78 if gx > X / 2 else 0.22
+        if second_touch:
+            # touch two: the real strike, to the spot you announced
+            return program(you, tuple(bp), (gx, gy, gz), 88)
         callout = say(f"P {pocket_fx:.2f} {gy/Y:.2f} t40", frame)
         if callout:
             return callout
-        # >>> TUNE: force + target choice = your whole offense
-        return program(you, tuple(bp), (gx, gy, gz), 85)
+        # touch one: gather — cushion it into your control
+        return program(you, tuple(bp), (bp[0], bp[1], bp[2]), 12)
 
     # >>> TUNE: positioning when you cannot touch (be the receiver!)
     station = (clamp(bp[0], z0 + 0.05 * X, z1 - 0.05 * X),

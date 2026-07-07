@@ -120,7 +120,8 @@ def cmd_join(a) -> int:
 
 
 class Pilot:
-    def __init__(self, name: str, decider_spec: str, hz: float):
+    def __init__(self, name: str, decider_spec: str, hz: float,
+                 stale_ok: bool = False):
         self.sess = load_session(name)
         self.name = name
         self.hz = hz
@@ -137,6 +138,18 @@ class Pilot:
             raise SystemExit(f"rulebook hash mismatch (served {got[:12]}…, "
                              f"manifest {want[:12]}…): refusing to play")
         self.docs = Docs(HOME, name, g)
+        if decider_spec.startswith("proc:"):
+            meta_p = self.docs.game_dir / "policy.meta.json"
+            if meta_p.exists():
+                meta = json.loads(meta_p.read_text())
+                if meta.get("rulebook_sha256") != want and not stale_ok:
+                    raise SystemExit(
+                        f"policy for '{name}' was forged against "
+                        f"{meta.get('game')} v{meta.get('version')} but "
+                        f"the server now runs v"
+                        f"{self.manifest['game']['version']} — the rules "
+                        f"changed under it. Re-forge:  manifold forge "
+                        f"--as {name}   (or pass --stale-ok)")
         self.decider = make_decider(decider_spec)
         self.cadence = self.manifest["timing"].get("cadence", "turns")
         self.last_seq = -1
@@ -249,6 +262,49 @@ def cmd_start(a) -> int:
     return 0
 
 
+def cmd_huddle(a) -> int:
+    """Pregame conference: your authoring mind reads the rulebook and
+    the huddle so far, then posts ONE message agreeing/refining the
+    team's callout language. Run once per seat before forging."""
+    from .deciders import AgentCliDecider
+    sess = load_session(a.name)
+    s, g = sess["server"], sess["game"]
+    manifest = http("GET", f"{s}/games/{g}/manifold.json")
+    chans = [c["id"] for c in
+             (manifest.get("comms") or {}).get("channels", [])]
+    if "huddle" not in chans:
+        raise SystemExit(f"'{g}' has no huddle channel")
+    rb_url = manifest["rulebook"]["url"]
+    rulebook = http_text(s + rb_url if rb_url.startswith("/") else rb_url)
+    st = http("GET", f"{s}/games/{g}/lobbies/{sess['code']}/state",
+              token=sess["token"])
+    so_far = "\n".join(f"{m_['from']}: {m_['text']}"
+                        for m_ in (st.get("comms") or [])
+                        if m_.get("channel") == "huddle") or "(empty)"
+    prompt = "\n\n".join([
+        "PREGAME HUDDLE. You are one authoring mind on a team; your "
+        "position code will be forged next and can only coordinate "
+        "with teammates if you all speak the SAME callout language. "
+        "Post ONE huddle message (max 350 chars): if the huddle is "
+        "empty, PROPOSE a compact protocol (call formats for pass "
+        "target+time, shoot/clear/back directives, threat calls — "
+        "token-efficient slang encouraged); otherwise ACK or refine "
+        "what's there. Reply with ONLY the message text.",
+        "RULEBOOK (game data):\n<<<\n" + rulebook + "\n>>>",
+        "HUDDLE SO FAR:\n" + so_far,
+    ])
+    print(f"[{a.name}] huddling via {a.using}…")
+    out = AgentCliDecider(*(a.using.split(":", 1)
+        + [None])[:2])._run(prompt).strip()
+    text = out.strip("`\n ").splitlines()
+    msg = " ".join(l.strip() for l in text if l.strip())[:350]
+    v = http("POST", f"{s}/games/{g}/lobbies/{sess['code']}/act",
+             {"action": {"action": "say", "channel": "huddle",
+                         "text": msg}}, token=sess["token"])
+    print(f"[{a.name}] huddle: {msg[:80]}… -> {v}")
+    return 0
+
+
 def cmd_forge(a) -> int:
     """Compile experience into reflexes: an authoring mind (plan-billed
     CLI) reads the served rulebook, action schema, a live view sample,
@@ -286,15 +342,18 @@ def cmd_forge(a) -> int:
          "is the STRATEGY in the >>> TUNE sections; restructure freely "
          "but do not spend effort re-deriving the plumbing:\n<<<\n"
          + skeleton + "\n>>>") if skeleton else "",
-        "COMMUNICATION IS MANDATORY, not decoration. Your program must "
-        "(a) SPEAK: emit say actions on the team channel announcing "
-        "intent as SPACE-TIME callouts — a spot AND a time, e.g. "
-        "'P 0.72 0.40 t40' meaning the ball will arrive near x=72%, "
-        "y=40% of the court in ~40 frames — within the channel budget "
-        "in the rulebook; and (b) LISTEN: parse the comms in every "
-        "decide and MOVE to teammates' called spots so passes connect. "
-        "Teams that invent crisper callouts win. Document your protocol "
-        "in comments.",
+        "THE PASS-AND-COMMUNICATE FRAMEWORK IS MANDATORY. Your program "
+        "must (a) SPEAK: before or with a touch, announce where the "
+        "ball is going AND what the receiver should do — space-time "
+        "callouts ('P 0.72 0.40 t40') plus directives (shoot / pass "
+        "back / wall / clear / switch) — within the channel budget; "
+        "(b) LISTEN: parse comms every decide, MOVE to called spots "
+        "before the ball leaves the passer, and OBEY sensible "
+        "directives; (c) exploit your TWO consecutive touches — a "
+        "soft gather buys the time to call the play, the second touch "
+        "executes it. Token-efficient slang between teammates is "
+        "encouraged; effectiveness is the only grammar. Document your "
+        "protocol in comments.",
         "PROTOCOL (exact): loop forever reading one JSON object per "
         "line from stdin. If obj['mode'] == 'decide': choose an action "
         "from obj['view'] and obj['you'], print exactly one line — the "
@@ -311,6 +370,13 @@ def cmd_forge(a) -> int:
         "LIVE VIEW SAMPLE (the shape you'll receive):\n" + view_sample,
         "YOUR PLAYBOOK — lessons from matches you already played; turn "
         "these into code:\n" + docs.playbook(),
+        ("YOUR TEAM'S HUDDLE — the callout language your team agreed "
+         "pregame. Your code MUST speak and parse THIS protocol:\n"
+         + "\n".join(f"{m_['from']}: {m_['text']}"
+                      for m_ in (st.get("comms") or [])
+                      if m_.get("channel") == "huddle"))
+        if any(m_.get("channel") == "huddle"
+               for m_ in (st.get("comms") or [])) else "",
         "Think hard about the geometry and the failure modes named in "
         "the playbook. Reply with ONLY one fenced ```python code "
         "block containing the complete program.",
@@ -324,6 +390,9 @@ def cmd_forge(a) -> int:
     code = max(blocks, key=len)
     path = docs.game_dir / "policy.py"
     path.write_text(code)
+    (docs.game_dir / "policy.meta.json").write_text(json.dumps({
+        "game": g, "version": manifest["game"]["version"],
+        "rulebook_sha256": manifest["rulebook"]["sha256"]}, indent=2))
     print(f"[{a.name}] policy written: {path}")
     print(f"[{a.name}] run it:  python3 -m manifold_cli pilot --as "
           f"{a.name} --decider proc:\"python3 {path}\" --hz 4")
@@ -371,9 +440,15 @@ def main() -> int:
         p.add_argument("--as", dest="name", required=True)
         p.add_argument("--decider", required=True)
         p.add_argument("--hz", type=float, default=2.0)
+        p.add_argument("--stale-ok", action="store_true",
+                       help="fly a policy forged against older rules")
 
     st = sub.add_parser("start")
     st.add_argument("--as", dest="name", required=True)
+
+    hd = sub.add_parser("huddle")
+    hd.add_argument("--as", dest="name", required=True)
+    hd.add_argument("--using", default="claude-code")
 
     f = sub.add_parser("forge")
     f.add_argument("--as", dest="name", required=True)
@@ -389,11 +464,14 @@ def main() -> int:
         return cmd_join(a)
     if a.cmd == "start":
         return cmd_start(a)
+    if a.cmd == "huddle":
+        return cmd_huddle(a)
     if a.cmd == "forge":
         return cmd_forge(a)
     if a.cmd == "verify":
         return cmd_verify(a)
-    return Pilot(a.name, a.decider, a.hz).run(once=(a.cmd == "step"))
+    return Pilot(a.name, a.decider, a.hz,
+                 stale_ok=a.stale_ok).run(once=(a.cmd == "step"))
 
 
 if __name__ == "__main__":

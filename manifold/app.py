@@ -121,6 +121,19 @@ def _update_records(lb: Lobby) -> None:
                 r["wins"] += 1
             else:
                 r["losses"] += 1
+    elif lb.game.ID == "prang2" and "points" in res:
+        g = c.setdefault("prang2", {})
+        for p in lb.players.values():
+            r = g.setdefault(p.name, {"matches": 0, "points": 0,
+                                      "wins": 0, "losses": 0, "draws": 0})
+            r["matches"] += 1
+            r["points"] += int(res["points"].get(p.name, 0))
+            if res.get("winner") == "draw":
+                r["draws"] += 1
+            elif res.get("winner") == p.team:
+                r["wins"] += 1
+            else:
+                r["losses"] += 1
     elif lb.game.ID == "convergence" and "score_each" in res:
         g = c.setdefault("convergence", {})
         for p in lb.players.values():
@@ -502,6 +515,8 @@ def leaderboard(game_id: str):
         rows.sort(key=lambda r: -r.get("bankroll", 0.0))
     elif game_id == "prang":
         rows.sort(key=lambda r: (-r.get("wins", 0), r.get("losses", 0)))
+    elif game_id == "prang2":
+        rows.sort(key=lambda r: (-r.get("points", 0), -r.get("wins", 0)))
     else:
         rows.sort(key=lambda r: -r.get("points", 0))
     return {"game": game_id, "leaderboard": rows}
@@ -677,9 +692,11 @@ async def act(game_id: str, code: str, body: dict,
     p = _player(lb, authorization, token)
     if p is None:
         raise HTTPException(401, "boarding token required (Authorization: Bearer …)")
-    if lb.phase == "lobby":
+    if lb.phase == "lobby" and (body.get("action") or {}).get(
+            "action") != "say":
         return JSONResponse({"accepted": False, "retry": True,
-                             "reason": "match has not started"})
+                             "reason": "match has not started — only "
+                                       "say (the huddle) works pregame"})
     if lb.phase == "done":
         return JSONResponse({"accepted": False, "retry": False,
                              "reason": "match is over"})
@@ -689,6 +706,9 @@ async def act(game_id: str, code: str, body: dict,
     if verb == "say":
         err = lb.comms.say(lb, p, str(action.get("channel", "")),
                            str(action.get("text", "")))
+        if not err:
+            lb.game.on_say(p, str(action.get("channel", "")),
+                           str(action.get("text", "")), lb.frame())
         verdict = ({"accepted": False, "retry": True, "reason": err}
                    if err else {"accepted": True, "kind": "say"})
     else:
