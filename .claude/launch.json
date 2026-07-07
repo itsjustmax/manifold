@@ -4,8 +4,14 @@
     {
       "name": "harbor",
       "runtimeExecutable": ".venv/bin/python",
-      "runtimeArgs": ["-m", "uvicorn", "manifold.app:app", "--port", "8873"],
-      "port": 8873
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "manifold.app:app",
+        "--port",
+        "8874"
+      ],
+      "port": 8874
     }
   ]
 }

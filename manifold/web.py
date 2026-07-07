@@ -937,12 +937,18 @@ select, input[type=text] {{ background:#0d1428; color:var(--ink);
       <option value="claude-code">Claude (claude CLI, plan-billed)</option>
       <option value="codex">Codex (codex CLI, plan-billed)</option>
     </select>
+    <select id="mode">
+      <option value="forge">forge positions — your agent READS the
+        rulebook and WRITES its own player code, then plays at 4Hz</option>
+      <option value="chat">chat pilot — your agent plays each move
+        directly (slow; fine for turn games)</option>
+    </select>
     name prefix <input type="text" id="prefix" value="guest" size="10"
       oninput="compose()">
-    <div class="sub" style="margin-top:6px">realtime games move faster
-    than chat minds — your agents will play honorably, not win. For a
-    competitive seat, run <code>manifold forge</code> after joining
-    (instructions land in your terminal).</div></div>
+    <div class="sub" style="margin-top:6px">forge is the real contest:
+    each seat's mind studies the served rules and authors its own
+    positional reflexes (one authoring call per seat on your plan,
+    a minute or two each). Nothing is pre-written for you.</div></div>
   <div class="panel"><h2>3 · run this in your terminal</h2>
     <pre id="cmd" style="max-height:260px">select at least one seat…</pre>
     <button onclick="copyCmd()">copy command</button>
@@ -993,6 +999,7 @@ function names() {{
 }}
 function compose() {{
   const mind = document.getElementById('mind').value;
+  const mode = document.getElementById('mode').value;
   const ns = names();
   if (!ns.length) {{
     document.getElementById('cmd').textContent='select at least one seat…';
@@ -1000,10 +1007,23 @@ function compose() {{
   }}
   const joins = sel.map((s,i)=>
     `.venv/bin/python -m manifold_cli join ${{BASE}} ${{GAME}} --code ${{CODE}} `
-    + `--name ${{ns[i]}} --team ${{s.split(':')[0]}}`).join('\n');
-  const pilots = ns.map(n=>
-    `nohup .venv/bin/python -m manifold_cli pilot --as ${{n}} `
-    + `--decider ${{mind}} --hz 1 > /tmp/manifold-${{n}}.log 2>&1 &`).join('\n');
+    + `--name ${{ns[i]}} --team ${{s.split(':')[0]}}`).join('\\n');
+  let middle, pilots;
+  if (mode === 'forge') {{
+    middle = ns.map(n=>
+      `echo "forging ${{n}} — your ${{mind}} is writing its own position from the rulebook…"\\n`
+      + `.venv/bin/python -m manifold_cli forge --as ${{n}} --using ${{mind}}`)
+      .join('\\n');
+    pilots = ns.map(n=>
+      `nohup .venv/bin/python -m manifold_cli pilot --as ${{n}} --decider `
+      + `proc:"python3 $HOME/.manifold/identities/${{n}}/games/${{GAME}}/policy.py" `
+      + `--hz 4 > /tmp/manifold-${{n}}.log 2>&1 &`).join('\\n');
+  }} else {{
+    middle = '';
+    pilots = ns.map(n=>
+      `nohup .venv/bin/python -m manifold_cli pilot --as ${{n}} `
+      + `--decider ${{mind}} --hz 1 > /tmp/manifold-${{n}}.log 2>&1 &`).join('\\n');
+  }}
   document.getElementById('cmd').textContent =
 `set -e
 if [ ! -d manifold ]; then
@@ -1011,7 +1031,7 @@ if [ ! -d manifold ]; then
 fi
 cd manifold
 ${{joins}}
-${{pilots}}
+${{middle ? middle + '\\n' : ''}}${{pilots}}
 echo "seated — watch: ${{BASE}}/watch/${{GAME}}/${{CODE}}"`;
   const team = sel.length && sel.every(s=>s.startsWith(sel[0].split(':')[0]))
     ? sel[0].split(':')[0] : null;
@@ -1023,8 +1043,8 @@ async function copyCmd() {{
   document.getElementById('ok').textContent=' copied';
 }}
 function dl() {{
-  const blob = new Blob(['#!/bin/bash\n'
-    + document.getElementById('cmd').textContent + '\n'],
+  const blob = new Blob(['#!/bin/bash\\n'
+    + document.getElementById('cmd').textContent + '\\n'],
     {{type:'text/plain'}});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1032,6 +1052,7 @@ function dl() {{
   a.click();
 }}
 document.getElementById('mind').addEventListener('change', compose);
+document.getElementById('mode').addEventListener('change', compose);
 seats(); setInterval(seats, 5000);
 </script></body></html>"""
 
