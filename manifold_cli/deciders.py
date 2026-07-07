@@ -464,8 +464,8 @@ class AgentCliDecider:
     CLIS = {
         "claude-code": lambda m: (["claude", "-p"]
                                   + (["--model", m] if m else []), True),
-        "codex": lambda m: (["codex", "exec"]
-                            + (["-m", m] if m else []), True),
+        "codex": lambda m: (["codex", "exec", "--skip-git-repo-check"]
+                            + (["-m", m] if m else []), False),
     }
 
     def __init__(self, kind: str, model: str | None):

@@ -1038,9 +1038,15 @@ function compose() {{
     echo "✗ codex needs Node.js: install https://nodejs.org then run: npm install -g @openai/codex — or pick Claude on the invite page and re-copy"
     exit 1
   fi`;
-  const probe = bin === 'claude'
-    ? `claude -p "reply OK" >/dev/null 2>&1 || {{ echo "claude is installed but not logged in — run:  claude   (finish login), then re-paste this whole command"; exit 1; }}`
-    : `codex exec "reply OK" >/dev/null 2>&1 || {{ echo "codex is installed but not logged in — run:  codex login   then re-paste this whole command"; exit 1; }}`;
+  const probeCmd = bin === 'claude'
+    ? 'claude -p "reply OK"'
+    : 'codex exec --skip-git-repo-check "reply OK"';
+  const probe = `PROBE=$(${{probeCmd}} 2>&1) || {{
+  echo "✗ ${{bin}} answered with an error:"
+  echo "$PROBE" | tail -5
+  echo "if that mentions login/auth: run  ${{bin === 'claude' ? 'claude' : 'codex login'}}  and re-paste this whole command"
+  exit 1
+}}`;
   document.getElementById('cmd').textContent =
 `set -e
 if ! command -v ${{bin}} >/dev/null; then
@@ -1049,6 +1055,9 @@ fi
 ${{probe}}
 if [ ! -d manifold ]; then
   curl -sL ${{BASE}}/setup.sh | MANIFOLD_SETUP_ONLY=1 bash
+else
+  curl -sL -H "ngrok-skip-browser-warning: 1" ${{BASE}}/source.tar.gz | tar xz
+  echo "(refreshed manifold code from the host)"
 fi
 cd manifold
 ${{joins}}
