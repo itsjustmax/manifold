@@ -473,10 +473,20 @@ class AgentCliDecider:
         self.cmd, self.use_stdin = self.CLIS[kind](model)
 
     def _run(self, prompt: str) -> str:
-        out = subprocess.run(
-            self.cmd if self.use_stdin else self.cmd + [prompt],
-            input=prompt if self.use_stdin else None,
-            capture_output=True, text=True, timeout=420)
+        try:
+            out = subprocess.run(
+                self.cmd if self.use_stdin else self.cmd + [prompt],
+                input=prompt if self.use_stdin else None,
+                stdin=(None if self.use_stdin else subprocess.DEVNULL),
+                capture_output=True, text=True, timeout=420)
+        except subprocess.TimeoutExpired as e:
+            partial = ((e.stdout or b"") if isinstance(e.stdout, (bytes, type(None)))
+                       else e.stdout)
+            if isinstance(partial, bytes):
+                partial = partial.decode(errors="replace")
+            raise RuntimeError(
+                f"{self.kind} timed out after 420s. Its last output:\n"
+                f"{(partial or '(nothing — likely waiting on an interactive prompt)')[-500:]}")
         if out.returncode != 0:
             raise RuntimeError(f"{self.kind} exited {out.returncode}: "
                                f"{(out.stderr or out.stdout)[:300]}")
