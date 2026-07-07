@@ -139,6 +139,18 @@ function drawP2(cv, D){
     cx.stroke();
     cx.fillStyle='#dbe4ff'; cx.font='11px monospace';
     cx.fillText(p.name, pp[0]+18, pp[1]-12);
+    if (D.meta && D.meta.some(m => m && m.lt === p.name)){
+      cx.strokeStyle='#fff'; cx.beginPath();
+      cx.arc(pp[0], pp[1], 24, 0, 7); cx.stroke();
+    }
+  }
+  // possession HUD: why ghosting happens is now on screen
+  if (D.meta && D.meta[0] && D.meta[0].tteam){
+    const m = D.meta[0];
+    cx.fillStyle='#7e8bb3'; cx.font='12px monospace';
+    cx.fillText('possession: ' + m.tteam + ' ×' + m.tcount
+      + ' · last touch: ' + m.lt + ' (locked out until next touch)',
+      14, cv.height - 12);
   }
   // minimap (top view): whole court, everyone, ball
   const mw=170, mh=Math.round(mw*A[1]/A[0]);
@@ -168,7 +180,7 @@ function drawP2(cv, D){
 // --- 30fps interpolation layer: snapshots arrive ~10Hz, we tween ---
 function p2norm(f){
   return {arena:f.arena, gy:f.goal_y, gz:f.goal_z, pad:f.pad,
-          ball_r:f.ball_r,
+          ball_r:f.ball_r, meta:f.balls_meta||f.meta||null,
           balls:f.balls||(f.ball?[[f.ball.x,f.ball.y,f.ball.z]]:[]),
           paddles:f.paddles};
 }
@@ -781,6 +793,8 @@ function frD(fr) {{
   return {{arena: R.frames.arena, gy: R.frames.goal_y,
     gz: R.frames.goal_z, pad: R.frames.pad, ball_r: R.frames.ball_r,
     balls: Array.isArray(fr.b[0]) ? fr.b : [fr.b],
+    meta: (fr.m || []).map(mm => ({{lt: mm[0], tteam: mm[1],
+                                    tcount: mm[2]}})),
     paddles: Object.entries(fr.v).map(([n, p]) => ({{name: n,
       team: R.frames.teams[n], x: p[0], y: p[1], z: p[2],
       yaw: p[3], pitch: p[4]}}))}};

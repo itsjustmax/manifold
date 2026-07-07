@@ -242,8 +242,14 @@ def physics_step(world: dict) -> list[dict]:
             thick = BALL_R + PAD_THICK
             dx, dy, dz = b["x"] - p["x"], b["y"] - p["y"], b["z"] - p["z"]
             dn = dx * n[0] + dy * n[1] + dz * n[2]
-            d0 = ((b0[0] - p["x"]) * n[0] + (b0[1] - p["y"]) * n[1]
-                  + (b0[2] - p["z"]) * n[2])
+            # sweep in RELATIVE terms: the paddle also moved this
+            # frame, so start the crossing test from where the ball
+            # was relative to where the paddle was
+            px0 = p["x"] - p["vx"]
+            py0 = p["y"] - p["vy"]
+            pz0 = p["z"] - p["vz"]
+            d0 = ((b0[0] - px0) * n[0] + (b0[1] - py0) * n[1]
+                  + (b0[2] - pz0) * n[2])
             crossed = ((d0 > thick and dn < -thick)
                        or (d0 < -thick and dn > thick))
             if crossed and abs(d0 - dn) > 1e-9:
@@ -647,6 +653,8 @@ re-simulates from spawn + program log to a digest anyone can verify.
                                "s": dict(world["score"]),
                                "b": [[b["x"], b["y"], b["z"]]
                                      for b in world["balls"]],
+                               "m": [[b["lt"], b["tteam"], b["tcount"]]
+                                     for b in world["balls"]],
                                "v": {n: [p["x"], p["y"], p["z"],
                                          p["yaw"], p["pitch"]]
                                      for n, p in world["paddles"].items()}})
@@ -669,6 +677,9 @@ re-simulates from spawn + program log to a digest anyone can verify.
                 "goal_y": list(GOAL_Y), "goal_z": list(GOAL_Z),
                 "pad": [PAD_W, PAD_H], "ball_r": BALL_R,
                 "balls": [[b["x"], b["y"], b["z"]] for b in w["balls"]],
+                "balls_meta": [{"lt": b["lt"], "tteam": b["tteam"],
+                                "tcount": b["tcount"]}
+                               for b in w["balls"]],
                 "paddles": [{"name": n, "x": p["x"], "y": p["y"],
                              "z": p["z"], "yaw": p["yaw"],
                              "pitch": p["pitch"], "team": p["team"]}
