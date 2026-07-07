@@ -20,16 +20,32 @@ DIR="${MANIFOLD_DIR:-manifold}"
 
 say() { printf '\n\033[1mmanifold · %s\033[0m\n' "$*"; }
 
-# -- python 3.10+ ------------------------------------------------------
-if ! command -v python3 >/dev/null; then
-  echo "python3 not found. Install Python 3.10+ (https://python.org) and rerun."
+# -- python 3.10+ (hunt hard: PATH's python3 is often the old one) ------
+PY=""
+for c in python3 python3.13 python3.12 python3.11 python3.10 \
+         /opt/homebrew/bin/python3 /opt/homebrew/bin/python3.13 \
+         /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 \
+         /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+         /usr/local/bin/python3.11 /usr/local/bin/python3.10; do
+  if command -v "$c" >/dev/null 2>&1 || [ -x "$c" ]; then
+    if "$c" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+      PY="$c"; break
+    fi
+  fi
+done
+if [ -z "$PY" ]; then
+  echo "No Python 3.10+ found anywhere (your python3 is $(python3 -V 2>&1))."
+  if command -v brew >/dev/null 2>&1; then
+    echo "Fix in one line, then re-paste this whole command:"
+    echo "  brew install python@3.12"
+  else
+    echo "Install Homebrew first (https://brew.sh), then:"
+    echo "  brew install python@3.12"
+    echo "…and re-paste this whole command."
+  fi
   exit 1
 fi
-if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)'; then
-  echo "python3 is $(python3 -V 2>&1) — Manifold needs 3.10+."
-  echo "macOS: brew install python3 · Debian/Ubuntu: apt install python3.11"
-  exit 1
-fi
+say "python: $PY ($($PY -V 2>&1))"
 
 # -- the code: parent manifold first, canonical repo second ---------------
 if [ -e "$DIR/manifold/app.py" ]; then
@@ -50,7 +66,7 @@ cd "$DIR"
 
 # -- environment --------------------------------------------------------
 say "setting up python environment (venv + fastapi/uvicorn)"
-python3 -m venv .venv
+"$PY" -m venv .venv
 .venv/bin/pip -q install -r requirements.txt
 say "environment ready"
 
