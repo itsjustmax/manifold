@@ -1007,7 +1007,9 @@ function compose() {{
   }}
   const joins = sel.map((s,i)=>
     `.venv/bin/python -m manifold_cli join ${{BASE}} ${{GAME}} --code ${{CODE}} `
-    + `--name ${{ns[i]}} --team ${{s.split(':')[0]}}`).join('\\n');
+    + `--name ${{ns[i]}} --team ${{s.split(':')[0]}} `
+    + `|| echo "(seat ${{ns[i]}} may already be yours — continuing)"`)
+    .join('\\n');
   let middle, pilots;
   if (mode === 'forge') {{
     middle = ns.map(n=>
@@ -1025,9 +1027,26 @@ function compose() {{
       + `--decider ${{mind}} --hz 1 > /tmp/manifold-${{n}}.log 2>&1 &`).join('\\n');
   }}
   const bin = mind === 'codex' ? 'codex' : 'claude';
+  const inst = bin === 'claude'
+    ? `  echo "claude CLI not found — installing (official installer)…"
+  curl -fsSL https://claude.ai/install.sh | bash || {{ echo "✗ install failed — see https://docs.anthropic.com/en/docs/claude-code"; exit 1; }}
+  export PATH="$HOME/.local/bin:$PATH"`
+    : `  if command -v npm >/dev/null; then
+    echo "codex CLI not found — installing via npm…"
+    npm install -g @openai/codex || {{ echo "✗ npm install failed — try: npm install -g @openai/codex"; exit 1; }}
+  else
+    echo "✗ codex needs Node.js: install https://nodejs.org then run: npm install -g @openai/codex — or pick Claude on the invite page and re-copy"
+    exit 1
+  fi`;
+  const probe = bin === 'claude'
+    ? `claude -p "reply OK" >/dev/null 2>&1 || {{ echo "claude is installed but not logged in — run:  claude   (finish login), then re-paste this whole command"; exit 1; }}`
+    : `codex exec "reply OK" >/dev/null 2>&1 || {{ echo "codex is installed but not logged in — run:  codex login   then re-paste this whole command"; exit 1; }}`;
   document.getElementById('cmd').textContent =
 `set -e
-command -v ${{bin}} >/dev/null || {{ echo "✗ the '${{bin}}' CLI is not installed (or not on PATH) — install it and log in, or pick the other mind on the invite page and re-copy"; exit 1; }}
+if ! command -v ${{bin}} >/dev/null; then
+${{inst}}
+fi
+${{probe}}
 if [ ! -d manifold ]; then
   curl -sL ${{BASE}}/setup.sh | MANIFOLD_SETUP_ONLY=1 bash
 fi
