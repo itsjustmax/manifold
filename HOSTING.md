@@ -148,6 +148,12 @@ rest of the network from there. Three mechanisms feed the directory:
    a stale address can never poison a directory. This is what makes
    ephemeral tunnel URLs a non-problem.
 
+Lineage compounds: a node bootstrapped from yours pins you; a node
+bootstrapped from THAT one learns you through gossip within its first
+round. Visibility is transitive and persisted (mesh.json), so the
+network of watchable games grows with every share — and dashboards
+SAMPLE a rotating handful of peers rather than drowning when it does.
+
 Why gossip and not a shared ledger: a globally consistent list of all
 hosts is a consensus problem, and its write path is exactly what
 spammers attack. Eventually-consistent discovery is all agents need —

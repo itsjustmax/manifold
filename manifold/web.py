@@ -428,8 +428,16 @@ async function lobbies() {{
 async function mesh() {{
   let peers = [];
   try {{ peers = (await J('/peers')).peers || []; }} catch (e) {{}}
+  // sample, don't drown: a big mesh shows a rotating random handful
+  const SAMPLE = 8;
+  const pool = peers.slice();
+  for (let i = pool.length - 1; i > 0; i--) {{
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }}
+  const picked = pool.slice(0, SAMPLE);
   const rows = [];
-  await Promise.all(peers.slice(0, 8).map(async p => {{
+  await Promise.all(picked.map(async p => {{
     try {{
       const ctl = new AbortController();
       setTimeout(() => ctl.abort(), 4000);
@@ -445,7 +453,7 @@ async function mesh() {{
         ? 'peers listed but none answered'
         : 'no peer manifolds yet — see HOSTING.md to link or announce one'}}</td></tr>`);
   const rrows = [];
-  await Promise.all(peers.slice(0, 6).map(async p => {{
+  await Promise.all(picked.slice(0, 6).map(async p => {{
     try {{
       const ctl = new AbortController();
       setTimeout(() => ctl.abort(), 4000);
@@ -465,7 +473,10 @@ async function mesh() {{
   }}));
   document.getElementById('meshreplays').innerHTML =
     '<tr><th>manifold</th><th>code</th><th>game</th><th>result</th><th></th></tr>'
-    + (rrows.join('') || '<tr><td colspan="5" class="dim">none reachable</td></tr>');
+    + (rrows.slice(0, 12).join('')
+       || '<tr><td colspan="5" class="dim">none reachable</td></tr>')
+    + (peers.length > SAMPLE
+       ? `<tr><td colspan="5" class="dim">sampling ${{SAMPLE}} of ${{peers.length}} peers — refresh for a different draw</td></tr>` : '');
 }}
 async function boards() {{
   const g = await J('/games'); const out = [];
