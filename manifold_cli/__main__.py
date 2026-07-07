@@ -240,6 +240,15 @@ class Pilot:
                 time.sleep(max(0.02, 1.0 / self.hz))
 
 
+def cmd_start(a) -> int:
+    """Deliberate kickoff for a staged lobby, using your seat's token."""
+    sess = load_session(a.name)
+    r = http("POST", f"{sess['server']}/games/{sess['game']}/lobbies/"
+                     f"{sess['code']}/start", {}, token=sess["token"])
+    print(f"[{a.name}] {r}")
+    return 0
+
+
 def cmd_forge(a) -> int:
     """Compile experience into reflexes: an authoring mind (plan-billed
     CLI) reads the served rulebook, action schema, a live view sample,
@@ -345,6 +354,9 @@ def main() -> int:
         p.add_argument("--decider", required=True)
         p.add_argument("--hz", type=float, default=2.0)
 
+    st = sub.add_parser("start")
+    st.add_argument("--as", dest="name", required=True)
+
     f = sub.add_parser("forge")
     f.add_argument("--as", dest="name", required=True)
     f.add_argument("--using", default="claude-code",
@@ -357,6 +369,8 @@ def main() -> int:
         return cmd_host(a)
     if a.cmd == "join":
         return cmd_join(a)
+    if a.cmd == "start":
+        return cmd_start(a)
     if a.cmd == "forge":
         return cmd_forge(a)
     if a.cmd == "verify":

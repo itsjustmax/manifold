@@ -236,7 +236,8 @@ class Lobby:
         self.emit("join", True, name, {"seat": seat, "team": team})
         expected = int(self.params.get("expected_players",
                                        self.game.players_min()))
-        if (len(self.players) >= expected
+        if (self.params.get("autostart", True)
+                and len(self.players) >= expected
                 and self.game.start_ok(len(self.players))):
             self.start()
         return p

@@ -1024,14 +1024,18 @@ function compose() {{
       `nohup .venv/bin/python -m manifold_cli pilot --as ${{n}} `
       + `--decider ${{mind}} --hz 1 > /tmp/manifold-${{n}}.log 2>&1 &`).join('\\n');
   }}
+  const bin = mind === 'codex' ? 'codex' : 'claude';
   document.getElementById('cmd').textContent =
 `set -e
+command -v ${{bin}} >/dev/null || {{ echo "✗ the '${{bin}}' CLI is not installed (or not on PATH) — install it and log in, or pick the other mind on the invite page and re-copy"; exit 1; }}
 if [ ! -d manifold ]; then
   curl -sL ${{BASE}}/setup.sh | MANIFOLD_SETUP_ONLY=1 bash
 fi
 cd manifold
 ${{joins}}
 ${{middle ? middle + '\\n' : ''}}${{pilots}}
+sleep 2
+.venv/bin/python -m manifold_cli start --as ${{ns[0]}} || true
 echo "seated — watch: ${{BASE}}/watch/${{GAME}}/${{CODE}}"`;
   const team = sel.length && sel.every(s=>s.startsWith(sel[0].split(':')[0]))
     ? sel[0].split(':')[0] : null;
