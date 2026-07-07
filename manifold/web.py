@@ -1012,10 +1012,11 @@ function compose() {{
     .join('\\n');
   let middle, pilots;
   if (mode === 'forge') {{
-    middle = ns.map(n=>
-      `echo "forging ${{n}} — your ${{mind}} is writing its own position from the rulebook…"\\n`
-      + `.venv/bin/python -m manifold_cli forge --as ${{n}} --using ${{mind}}`)
-      .join('\\n');
+    middle = `echo "forging ${{ns.length}} positions in parallel — your ${{mind}} tunes a served framework (a few minutes)…"\\n`
+      + ns.map(n=>
+        `.venv/bin/python -m manifold_cli forge --as ${{n}} --using ${{mind}} &`)
+        .join('\\n')
+      + `\\nwait`;
     pilots = ns.map(n=>
       `nohup .venv/bin/python -m manifold_cli pilot --as ${{n}} --decider `
       + `proc:"python3 $HOME/.manifold/identities/${{n}}/games/${{GAME}}/policy.py" `
@@ -1208,11 +1209,14 @@ async function state() {{
   if (GAME === 'convergence') convBoard(st);
   if (GAME === 'fogline') fogBoard(st);
   $('view').textContent = JSON.stringify(st.view, null, 1);
-  $('comms').innerHTML = (st.comms||[]).slice(-25).map(m =>
-    `<div><span class="dim">[${{m.channel}}]</span> <b>${{m.from}}</b> ${{m.text}}</div>`).join('')
-    || '<div class="sub">quiet so far</div>';
-  $('commsnote').textContent = done ? 'match over — sealed channels revealed'
-    : 'team/sealed channels reveal at match end';
+  $('comms').innerHTML = (st.comms||[]).slice(-25).map(m => {{
+    const c = m.team === 'west' ? '#4da3ff'
+            : m.team === 'east' ? '#ff9d4d' : 'var(--ink)';
+    return `<div><span class="dim">[${{m.channel}}]</span>
+      <b style="color:${{c}}">${{m.from}}</b> ${{m.text}}</div>`;
+  }}).join('') || '<div class="sub">quiet so far</div>';
+  $('commsnote').textContent = done ? 'match over — all channels revealed'
+    : 'team talk on ~8s broadcast delay · opponents never hear it live';
   if (st.result) {{
     $('resultbox').style.display = 'block';
     $('result').textContent = JSON.stringify(st.result, null, 1);

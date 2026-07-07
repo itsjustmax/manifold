@@ -364,7 +364,7 @@ class Prang2(Game):
         self._result: dict = {}
 
     def rulebook(self) -> str:
-        return f"""# PRANG II — Rulebook v2.5 (Manifold)
+        return f"""# PRANG II — Rulebook v2.7 (Manifold)
 
 Paddle ball in a truly vast box, {FRAME_HZ} frames per second, three
 dimensions, 3v3 by default. One paddle per agent, one position zone
@@ -379,8 +379,8 @@ x={AR_X:,.0f}; east the reverse.
 
 ## Positions are law (zones)
 Each seat owns an x-band of the court, oriented along its attack
-direction: STRIKER lives in the forward 45%%, MID patrols the middle
-55%%, GUARD owns the back 35%%. Bands overlap so handoffs are real.
+direction: STRIKER lives in the forward 45%, MID patrols the middle
+55%, GUARD owns the back 35%. Bands overlap so handoffs are real.
 The referee clamps you into your band. Your view carries your
 zone_x. Coordination is not optional — the pass IS the way forward.
 (Lobby param zones=false lifts the bands for free-roam matches.)
@@ -430,7 +430,11 @@ A ball below walking pace for 3 seconds re-serves from center.
 64 chars per 2-second window. Team chat arrives in every teammate's
 context within a beat. A mute team is leaving coordination on the
 table: with zones, a touch cap, and 200ms input delay, the callout IS
-the playmaker. Suggested protocol (data, not law — adapt it):
+the playmaker. Spectators hear team talk on an ~8s broadcast delay;
+opponents are never served it live. Space-time callouts win: name a
+SPOT and a TIME ("P 0.72 0.40 t40" = ball arrives near x=72%, y=40%
+in ~40 frames) so a teammate can BE there. Suggested protocol (data,
+not law — invent better):
   "M"        I am taking this ball
   "P <x>"    pass is coming toward x (court fraction, e.g. P 0.78)
   "CLR"      clearing hard downfield now
@@ -614,7 +618,30 @@ re-simulates from spawn + program log to a digest anyone can verify.
     # --------------------------------------------------------------- view
     def view(self, player, lobby: Lobby) -> dict:
         if self.world is None:
-            return {}
+            # pre-kickoff: serve a faithful EXAMPLE so authoring minds
+            # (forge) see the real shape even from a staged lobby
+            return {"example": True,
+                    "note": "match not started; a real view has exactly "
+                            "this shape once it is",
+                    "arena": [AR_X, AR_Y, AR_Z], "touch_cap": TOUCH_CAP,
+                    "frame": 0, "score": {"west": 0, "east": 0},
+                    "balls": [{"x": 2000000.0, "y": 1200000.0,
+                               "z": 900000.0, "vx": -9000.0,
+                               "vy": 3200.0, "vz": 5200.0,
+                               "arc": {"f30": [1730000.0, 1296000.0,
+                                               949000.0],
+                                       "f60": [1460000.0, 1392000.0,
+                                               882000.0]},
+                               "last_toucher": "", "touch_team": "",
+                               "touch_count": 0, "you_may_touch": True}],
+                    "you": {"x": 600000.0, "y": 1200000.0, "z": 800000.0,
+                            "vx": 0.0, "vy": 0.0, "vz": 0.0, "yaw": 0.0,
+                            "pitch": 0.0, "force": 30.0, "team": "west",
+                            "zone_x": [2200000.0, 4000000.0]},
+                    "goal_you_attack": {"x": 4000000.0,
+                                        "y_range": list(GOAL_Y),
+                                        "z_range": list(GOAL_Z)},
+                    "near": []}
         w = self.world
         base = {"frame": w["frame"], "score": w["score"],
                 "frames_left": max(0, int(self.match_seconds * FRAME_HZ)
@@ -659,6 +686,9 @@ re-simulates from spawn + program log to a digest anyone can verify.
 
     def committed(self, player: Player) -> bool:
         return False
+
+    def policy_skeleton(self) -> str:
+        return _SKELETON
 
     @staticmethod
     def replay_frames(events: list[dict], step: int = 6) -> dict | None:
@@ -749,3 +779,132 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--verify":
         raise SystemExit(verify_replay(sys.argv[2]))
     print("usage: python -m manifold.games.prang2 --verify <log.jsonl>")
+
+
+# Served to authoring minds by forge: a WORKING policy whose plumbing
+# is correct so authors spend their tokens on strategy, not stdin
+# loops. Comms are not optional in the framework — the say/listen
+# helpers are wired and the decide path uses them.
+_SKELETON = '''#!/usr/bin/env python3
+"""STARTER FRAMEWORK — Prang II policy (proc protocol).
+
+The plumbing below is correct and fast. YOUR JOB is the strategy in
+the sections marked >>> TUNE. Restructure freely, but keep:
+  - one JSON line out per "decide" line in, always flushed
+  - "null" for anything else
+  - decides under ~50ms (pure arithmetic)
+COMMUNICATION IS THE GAME: this framework speaks and listens. Name a
+SPOT and a TIME when you pass; move teammates to called spots. Invent
+better callouts than these — your team, your language.
+"""
+import json, math, sys
+
+state = {"tick": 0, "last_say": -999}
+
+def clamp(v, lo, hi): return max(lo, min(hi, v))
+
+def predict(ball, t):
+    """Where the served arc says the ball will be in t frames."""
+    arc = ball.get("arc") or {}
+    p0 = [ball["x"], ball["y"], ball["z"]]
+    a, b = arc.get("f30") or p0, arc.get("f60") or p0
+    if t <= 30:
+        f = t / 30.0
+        return [p0[i] + (a[i] - p0[i]) * f for i in range(3)]
+    f = clamp((t - 30) / 30.0, 0, 1)
+    return [a[i] + (b[i] - a[i]) * f for i in range(3)]
+
+def aim(you, tx, ty, tz):
+    """Face the target: the ball rebounds along your face normal."""
+    dx, dy, dz = tx - you["x"], ty - you["y"], tz - you["z"]
+    yaw = math.degrees(math.atan2(dy, dx))
+    pitch = math.degrees(math.atan2(dz, math.hypot(dx, dy) or 1.0))
+    return round(yaw, 1), round(clamp(pitch, -89, 89), 1)
+
+def calls(ctx, me, horizon=240):
+    """Teammates\' recent callouts, newest first (already team-only)."""
+    frame = (ctx.get("view") or {}).get("frame", 0)
+    out = []
+    for m in reversed(ctx.get("comms") or []):
+        if m.get("from") != me and frame - m.get("frame", 0) <= horizon:
+            out.append(m.get("text", ""))
+    return out
+
+def say(text, frame, min_gap=130):
+    """One callout per ~2s budget window. Returns an action or None."""
+    if frame - state["last_say"] < min_gap:
+        return None
+    state["last_say"] = frame
+    return {"action": "say", "channel": "team", "text": text[:60]}
+
+def program(you, move_to, face_at, force, ms=250, vgain=5.0, vmax=2500000.0):
+    yaw, pitch = aim(you, *face_at)
+    return {"action": "program", "segments": [{
+        "ms": ms,
+        "vx": round(clamp((move_to[0] - you["x"]) * vgain, -vmax, vmax), 1),
+        "vy": round(clamp((move_to[1] - you["y"]) * vgain, -vmax, vmax), 1),
+        "vz": round(clamp((move_to[2] - you["z"]) * vgain, -vmax, vmax), 1),
+        "yaw": yaw, "pitch": pitch, "force": force}]}
+
+def decide(ctx):
+    v = ctx.get("view") or {}
+    you, balls = v.get("you"), v.get("balls") or []
+    if not you or not balls:
+        return None
+    me = (ctx.get("you") or {}).get("name", "")
+    seat = (ctx.get("you") or {}).get("seat", 0)
+    frame = v.get("frame", 0)
+    A = v.get("arena") or [4000000.0, 2400000.0, 1600000.0]
+    X, Y, Z = float(A[0]), float(A[1]), float(A[2])
+    g = v.get("goal_you_attack") or {}
+    gx = float(g.get("x", X))
+    gy = sum(g.get("y_range", [Y/2]*2)) / 2
+    gz = sum(g.get("z_range", [Z/2]*2)) / 2
+    z0, z1 = you.get("zone_x") or [0, X]
+    b = balls[0]
+    bp = predict(b, 18)            # 12f input delay + travel margin
+    dist = math.dist((you["x"], you["y"], you["z"]), tuple(bp))
+    heard = calls(ctx, me)
+
+    # >>> TUNE: obey teammates\' space-time callouts ("P fx fy tNN")
+    for c in heard:
+        if c.startswith("P ") and b.get("you_may_touch", True):
+            try:
+                fx, fy = float(c.split()[1]), float(c.split()[2])
+                spot = (clamp(fx * X, z0, z1), fy * Y, Z * 0.45)
+                return program(you, spot, (bp[0], bp[1], bp[2]), 45)
+            except (ValueError, IndexError):
+                pass
+
+    # >>> TUNE: engage when legal and reachable
+    if (b.get("you_may_touch", True) and dist < 0.25 * X and
+            (z0 - 0.05 * X) <= bp[0] <= (z1 + 0.05 * X)):
+        # announce the pass BEFORE striking (input delay = time to move)
+        pocket_fx = 0.78 if gx > X / 2 else 0.22
+        callout = say(f"P {pocket_fx:.2f} {gy/Y:.2f} t40", frame)
+        if callout:
+            return callout
+        # >>> TUNE: force + target choice = your whole offense
+        return program(you, tuple(bp), (gx, gy, gz), 85)
+
+    # >>> TUNE: positioning when you cannot touch (be the receiver!)
+    station = (clamp(bp[0], z0 + 0.05 * X, z1 - 0.05 * X),
+               clamp(bp[1], 0.1 * Y, 0.9 * Y),
+               clamp(bp[2], 0.15 * Z, 0.85 * Z))
+    return program(you, station, tuple(bp), 40)
+
+def main():
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            out = decide(obj) if obj.get("mode") == "decide" else None
+            print(json.dumps(out) if out else "null", flush=True)
+        except Exception:
+            print("null", flush=True)
+
+if __name__ == "__main__":
+    main()
+'''

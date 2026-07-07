@@ -119,7 +119,14 @@ class Comms:
                    player.name, {"channel": channel, "text": text})
         return None
 
-    def visible_to(self, player: Optional[Player], done: bool) -> list[dict]:
+    BROADCAST_DELAY_FRAMES = 480    # ~8s: spectators hear team talk on a
+                                    # sports-style delay; opponents never
+                                    # get it served (though anything a
+                                    # viewer sees, a cheat could read —
+                                    # the delay is what makes that stale)
+
+    def visible_to(self, player: Optional[Player], done: bool,
+                   frame: int = 0) -> list[dict]:
         out = []
         for m in self.messages[-60:]:
             if done:
@@ -128,9 +135,14 @@ class Comms:
                 continue
             elif m["scope"] == "all":
                 out.append(m)
-            elif m["scope"] == "team" and player is not None and player.team == m["team"]:
-                out.append(m)
-        return [{k: m[k] for k in ("channel", "from", "text", "frame")} for m in out]
+            elif m["scope"] == "team":
+                if player is not None and player.team == m["team"]:
+                    out.append(m)
+                elif (player is None and
+                      frame - m["frame"] >= self.BROADCAST_DELAY_FRAMES):
+                    out.append(m)
+        return [{k: m[k] for k in ("channel", "from", "text",
+                                   "frame", "team")} for m in out]
 
 
 class Lobby:
@@ -281,7 +293,7 @@ class Lobby:
                      "committed": self.game.committed(player)}
                     if player else None),
             "view": self.game.view(player, self),
-            "comms": self.comms.visible_to(player, done),
+            "comms": self.comms.visible_to(player, done, self.frame()),
             "deadline_utc": self.game.deadline_utc(),
             "result": self.result,
         }
@@ -358,6 +370,12 @@ class Game:
     def start_ok(self, n_players: int) -> bool:
         """May the match begin with this many seated? (Max's hook.)"""
         return True
+
+    def policy_skeleton(self) -> Optional[str]:
+        """A working starter policy (proc protocol) that forge hands to
+        authoring minds so they tune strategy instead of deriving
+        plumbing. None = no framework served."""
+        return None
 
     def view(self, player: Optional[Player], lobby: Lobby) -> dict: return {}
     def committed(self, player: Player) -> bool: return False

@@ -256,7 +256,20 @@ def replay_json(game_id: str, code: str):
 _SOURCE_ITEMS = ["PROTOCOL.md", "SPEC.md", "README.md", "HOSTING.md",
                  "CLAUDE.md", "requirements.txt", ".gitignore",
                  "setup.sh", "manifold", "manifold_cli", "tests"]
-_source_cache: bytes | None = None
+_source_cache: tuple[float, bytes] | None = None
+
+
+def _source_mtime(root: Path) -> float:
+    latest = 0.0
+    for item in _SOURCE_ITEMS:
+        p = root / item
+        if p.is_file():
+            latest = max(latest, p.stat().st_mtime)
+        elif p.is_dir():
+            for f in p.rglob("*"):
+                if f.is_file() and "__pycache__" not in f.parts:
+                    latest = max(latest, f.stat().st_mtime)
+    return latest
 
 
 def _source_tarball() -> bytes:
@@ -264,9 +277,10 @@ def _source_tarball() -> bytes:
     byte-identical UI out — that's how branding stays consistent across
     instances without a central server in the loop."""
     global _source_cache
-    if _source_cache is not None:
-        return _source_cache
     root = Path(__file__).resolve().parent.parent
+    stamp = _source_mtime(root)
+    if _source_cache is not None and _source_cache[0] == stamp:
+        return _source_cache[1]
     buf = io.BytesIO()
 
     def keep(ti: tarfile.TarInfo) -> tarfile.TarInfo | None:
@@ -282,8 +296,8 @@ def _source_tarball() -> bytes:
             p = root / item
             if p.exists():
                 tar.add(p, arcname=f"manifold/{item}", filter=keep)
-    _source_cache = buf.getvalue()
-    return _source_cache
+    _source_cache = (stamp, buf.getvalue())
+    return _source_cache[1]
 
 
 @app.get("/source.tar.gz")
@@ -561,6 +575,14 @@ def games(request: Request):
 def manifest(game_id: str, request: Request):
     base = str(request.base_url).rstrip("/")
     return _game_cls(game_id)().manifest(base)
+
+
+@app.get("/games/{game_id}/policy-skeleton.py")
+def policy_skeleton(game_id: str):
+    sk = _game_cls(game_id)().policy_skeleton()
+    if not sk:
+        raise HTTPException(404, f"'{game_id}' serves no policy skeleton")
+    return PlainTextResponse(sk)
 
 
 @app.get("/games/{game_id}/rulebook.md")

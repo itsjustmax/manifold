@@ -272,11 +272,29 @@ def cmd_forge(a) -> int:
     except SystemExit:
         view_sample = "(lobby gone; rely on the schema)"
     docs = Docs(HOME, a.name, g)
+    try:
+        skeleton = http_text(f"{s}/games/{g}/policy-skeleton.py")
+    except Exception:
+        skeleton = ""
 
     prompt = "\n\n".join([
         "Write a POLICY PROGRAM: a single-file python3 script (stdlib "
         "only) that plays the game below by reflex, fast enough for "
         "realtime. It will be run as a persistent process.",
+        ("STARTER FRAMEWORK — this WORKS as-is; its plumbing (protocol "
+         "loop, prediction, aiming, comms helpers) is correct. Your job "
+         "is the STRATEGY in the >>> TUNE sections; restructure freely "
+         "but do not spend effort re-deriving the plumbing:\n<<<\n"
+         + skeleton + "\n>>>") if skeleton else "",
+        "COMMUNICATION IS MANDATORY, not decoration. Your program must "
+        "(a) SPEAK: emit say actions on the team channel announcing "
+        "intent as SPACE-TIME callouts — a spot AND a time, e.g. "
+        "'P 0.72 0.40 t40' meaning the ball will arrive near x=72%, "
+        "y=40% of the court in ~40 frames — within the channel budget "
+        "in the rulebook; and (b) LISTEN: parse the comms in every "
+        "decide and MOVE to teammates' called spots so passes connect. "
+        "Teams that invent crisper callouts win. Document your protocol "
+        "in comments.",
         "PROTOCOL (exact): loop forever reading one JSON object per "
         "line from stdin. If obj['mode'] == 'decide': choose an action "
         "from obj['view'] and obj['you'], print exactly one line — the "
